@@ -126,75 +126,86 @@ func (r *GridRenderer) isValidViewport(region GridRegion) bool {
 func (r *GridRenderer) renderOrchestrator(forceFullRender bool) {
 	ctx := r.context
 	cm := ctx.CoordManager
-	rr := r.regionRenderer
 
-	//vpCurrent := ctx.Viewports[RegionMain]
+	scrollChange := ctx.ScrollOffsetChanged()
 
-	/*
-		if ctx.Mode == RenderModeStartup {
-			isValidCurrent := vpCurrent.FirstRowVisIdx <= vpCurrent.LastRowVisIdx &&
-				vpCurrent.FirstColVisIdx <= vpCurrent.LastColVisIdx &&
-				vpCurrent.FirstRowVisIdx >= 0
+	// ============================================================
+	// PHASE 1: Render Each Region Independently
+	// ============================================================
+	r.renderRegion(RegionMain, r.regionMain, forceFullRender, scrollChange)
 
-			if !isValidCurrent {
-				return
+	hasFrozenCols := cm.HasVisibleFrozenColumns()
+	hasFrozenRows := cm.HasVisibleFrozenRows()
+
+	// Fixed Corner (only if both frozen rows/cols exist)
+	if hasFrozenCols && hasFrozenRows {
+		r.renderRegion(RegionFixedCorner, r.regionFrozen, forceFullRender, scrollChange)
+	} else {
+		// Mark as "completed" even though it doesn't exist
+		ctx.PaneHasRenderedOnce[RegionFixedCorner] = true
+	}
+
+	// Frozen Rows
+	if hasFrozenRows {
+		r.renderRegion(RegionFrozenRows, r.regionRowFrozen, forceFullRender, scrollChange)
+	} else {
+		ctx.PaneHasRenderedOnce[RegionFrozenRows] = true
+	}
+
+	// Frozen Columns
+	if hasFrozenCols {
+		r.renderRegion(RegionFrozenCols, r.regionColFrozen, forceFullRender, scrollChange)
+	} else {
+		ctx.PaneHasRenderedOnce[RegionFrozenCols] = true
+	}
+
+	// ============================================================
+	// PHASE 2: Activate Optimizations Once All Regions Ready
+	// ============================================================
+	if ctx.SheetRenderState != RenderStateRunning {
+		allRendered := true
+		for _, hasRendered := range ctx.PaneHasRenderedOnce {
+			if !hasRendered {
+				allRendered = false
+				break
 			}
-			ctx.Mode = RenderModeRunning
-			forceFullRender = true
 		}
-	*/
-	//ctx.StartRenderCycle()
 
-	if ctx.SheetRenderState == RenderStateRunning {
-		scrollChange := ctx.ScrollOffsetChanged()
+		if allRendered {
+			ctx.SheetRenderState = RenderStateRunning
+			// From this point forward, viewport validation checks are bypassed
+			if ctx.Data.Settings.ShowHeadings {
+				// If we have Headers; do a Full Render Now
+				hr := r.headerRenderer
 
-		// Force full render OR scroll occurred
-		renderMain := forceFullRender || scrollChange.X || scrollChange.Y
-		renderCorner := forceFullRender
-		renderFrozenRows := forceFullRender || scrollChange.X
-		renderFrozenCols := forceFullRender || scrollChange.Y
-		// === CELLS ===
-		if renderMain {
-			rr.renderRegion(r.regionMain, RegionMain)
-		}
-		if renderCorner {
-			if cm.GetVisibleFrozenColumns() > 0 && cm.GetVisibleFrozenRows() > 0 {
-				//rr.renderRegion(r.regionFrozen, RegionFixedCorner)
-			}
-		}
+				hr.renderFullColumnHeaders(r.colHdrContainer)
 
-		if renderFrozenRows && cm.GetVisibleFrozenRows() > 0 {
-			//rr.renderRegion(r.regionRowFrozen, RegionFrozenRows)
-		}
+				hr.renderFullRowHeaders(r.rowHdrContainer)
 
-		if renderFrozenCols && cm.GetVisibleFrozenColumns() > 0 {
-			//rr.renderRegion(r.regionColFrozen, RegionFrozenCols)
-		}
+				if hasFrozenCols {
+					hr.renderFixedColumnHeaders(r.colHdrFrozenContainer)
+				}
 
-		// === HEADERS ===
-		if ctx.Data.Settings.ShowHeadings {
-			hr := r.headerRenderer
+				if hasFrozenRows {
+					hr.renderFixedRowHeaders(r.rowHdrFrozenContainer)
+				}
 
-			if renderFrozenRows {
-				hr.renderColumnHeaders(r.colHdrContainer)
-			}
-			if renderFrozenCols {
-				hr.renderRowHeaders(r.rowHdrContainer)
-			}
-
-			if renderCorner && cm.GetVisibleFrozenColumns() > 0 {
-				hr.renderFixedColumnHeaders(r.colHdrFrozenContainer)
-			}
-
-			if renderCorner && cm.GetVisibleFrozenRows() > 0 {
-				hr.renderFixedRowHeaders(r.rowHdrFrozenContainer)
-			}
-
-			if renderCorner {
 				hr.RenderCorner(r.cnrHdrContainer)
 			}
 		}
 
+	} else {
+		if ctx.Data.Settings.ShowHeadings {
+			hr := r.headerRenderer
+
+			if scrollChange.X || forceFullRender {
+				hr.renderColumnHeaders(r.colHdrContainer)
+			}
+			if scrollChange.Y || forceFullRender {
+				hr.renderRowHeaders(r.rowHdrContainer)
+			}
+
+		}
 		// === GROUPS ===
 		hasColGroups := len(ctx.GroupManager.colGroups) > 0
 		hasRowGroups := len(ctx.GroupManager.rowGroups) > 0
@@ -202,18 +213,18 @@ func (r *GridRenderer) renderOrchestrator(forceFullRender bool) {
 		if hasColGroups || hasRowGroups {
 			gr := r.groupRenderer
 
-			if renderFrozenRows && hasColGroups {
+			if hasFrozenRows && hasColGroups {
 				gr.renderColGroupIndicators(r.colGroupContainer)
 			}
-			if renderFrozenCols && hasRowGroups {
+			if hasFrozenCols && hasRowGroups {
 				gr.renderRowGroupIndicators(r.rowGroupContainer)
 			}
 
-			if renderCorner && hasColGroups && cm.GetVisibleFrozenColumns() > 0 {
+			if forceFullRender && hasColGroups && hasFrozenCols {
 				gr.RenderFixedColumnGroups(r.colGroupFrozenContainer)
 			}
 
-			if renderCorner && hasRowGroups && cm.GetVisibleFrozenRows() > 0 {
+			if forceFullRender && hasRowGroups && hasFrozenRows {
 				gr.RenderFixedRowGroups(r.rowGroupFrozenContainer)
 			}
 		}
@@ -221,63 +232,8 @@ func (r *GridRenderer) renderOrchestrator(forceFullRender bool) {
 		dr := r.dividerRenderer
 		dr.updateDividers(r.freezePaneDividerContainer)
 
-		ctx.FinalizeRenderCycle()
-	} else {
-		// only down here as we are still getting going
-		if r.isValidViewport(RegionMain) && ctx.PaneRenderState[RegionMain] != RenderStateRunning {
-			ctx.PaneRenderState[RegionMain] = RenderStateStarting
-			rr.renderFullRegion(r.regionMain, RegionMain)
-			ctx.PaneRenderState[RegionMain] = RenderStateRunning
-		}
-
-		if r.isValidViewport(RegionFixedCorner) && ctx.PaneRenderState[RegionFixedCorner] != RenderStateRunning {
-			if cm.GetVisibleFrozenColumns() > 0 && cm.GetVisibleFrozenRows() > 0 {
-				ctx.PaneRenderState[RegionFixedCorner] = RenderStateStarting
-				//rr.renderFullRegion(r.regionFrozen, RegionFixedCorner)
-				ctx.PaneRenderState[RegionFixedCorner] = RenderStateRunning
-			}
-		}
-
-		if cm.GetVisibleFrozenRows() > 0 {
-			ctx.PaneRenderState[RegionFrozenRows] = RenderStateStarting
-			//rr.renderFullRegion(r.regionRowFrozen, RegionFrozenRows)
-			ctx.PaneRenderState[RegionFrozenRows] = RenderStateRunning
-		}
-
-		if cm.GetVisibleFrozenColumns() > 0 {
-			ctx.PaneRenderState[RegionFrozenCols] = RenderStateStarting
-			//rr.renderFullRegion(r.regionColFrozen, RegionFrozenCols)
-			ctx.PaneRenderState[RegionFrozenCols] = RenderStateRunning
-		}
-
-		// === HEADERS ===
-		if ctx.Data.Settings.ShowHeadings {
-			hr := r.headerRenderer
-
-			hr.renderFullColumnHeaders(r.colHdrContainer)
-
-			hr.renderFullRowHeaders(r.rowHdrContainer)
-
-			if cm.GetVisibleFrozenColumns() > 0 {
-				hr.renderFixedColumnHeaders(r.colHdrFrozenContainer)
-			}
-
-			if cm.GetVisibleFrozenRows() > 0 {
-				hr.renderFixedRowHeaders(r.rowHdrFrozenContainer)
-			}
-		}
-		bStarted := true
-		for _, y := range ctx.PaneRenderState {
-			if y != RenderStateRunning {
-				bStarted = false
-			}
-		}
-		if bStarted {
-			ctx.SheetRenderState = RenderStateRunning
-		}
-
 	}
-
+	ctx.FinalizeRenderCycle()
 }
 
 func (r *GridRenderer) Render() {
@@ -344,11 +300,7 @@ func (r *GridRenderer) setupScrollCallback() {
 		ctx.SetScrollOffset(pos)
 		ctx.UpdateViewports(r.scroll.Size())
 
-		if ctx.Viewports[RegionMain].FirstRowVisIdx != -1 {
-			//fmt.Printf("[-CALLBACK] Width:%f, Height:%f\n", r.scroll.Size().Width, r.scroll.Size().Height)
-			r.renderOrchestrator(false)
-			//ctx.FinalizeRenderCycle()
-		}
+		r.renderOrchestrator(false)
 
 	}
 }
@@ -376,10 +328,6 @@ func (r *GridRenderer) buildMainContainer() {
 	r.xlContainer = container.NewStack(mainApp, r.freezePaneDividerContainer)
 
 	ctx.UpdateViewports(r.scroll.Size())
-	//if ctx.Viewports[RegionMain].FirstRowVisIdx != -1 {
-	//r.renderOrchestrator(true)
-	//ctx.FinalizeRenderCycle()
-	//}
 }
 
 func (r *GridRenderer) GetContainer() *fyne.Container {
@@ -609,13 +557,8 @@ func (r *GridRenderer) OnResize(newSize fyne.Size) {
 
 	ctx.UpdateViewports(r.scroll.Size())
 
-	if ctx.Viewports[RegionMain].FirstRowVisIdx == -1 {
-		return
-	}
 	//fmt.Printf("[SCROLL-RESIZE] Width:%f, Height:%f\n", r.scroll.Size().Width, r.scroll.Size().Height)
 	r.renderOrchestrator(true)
-
-	//ctx.FinalizeRenderCycle()
 }
 
 func (r *GridRenderer) updateScrollContentSize() {

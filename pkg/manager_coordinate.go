@@ -388,9 +388,15 @@ func (cm *CoordinateManager) GetWidthByModIdx(colModIdx int) float32 {
 func (cm *CoordinateManager) GetVisibleFrozenRows() int {
 	return cm.lastFreezeRowVisIdx
 }
+func (cm *CoordinateManager) HasVisibleFrozenRows() bool {
+	return cm.lastFreezeRowVisIdx > 0
+}
 
 func (cm *CoordinateManager) GetVisibleFrozenColumns() int {
 	return cm.lastFreezeColVisIdx
+}
+func (cm *CoordinateManager) HasVisibleFrozenColumns() bool {
+	return cm.lastFreezeColVisIdx > 0
 }
 
 func (cm *CoordinateManager) FindFirstVisibleColInRange(startModIdx, endModIdx int) int {

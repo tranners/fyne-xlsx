@@ -234,19 +234,11 @@ func (pglr *PrimitiveGridLineRenderer) isHorisontalGridLineRequired(isTransparen
 			if hasBackground, _ := mm.anchorHasBackgroundCache[anchorVisIdx]; hasBackground {
 				return false
 			}
-			/*
-				if needed, ok := isTransparent[anchorVisIdx]; ok {
-					if !needed {
-						return false
-					}
-				}
-			*/
 		} else {
 			// in the merged range somewhere
 			return false
 		}
 	} else {
-
 		if needed, ok := isTransparent[id]; ok {
 			if !needed {
 				return false
@@ -254,6 +246,7 @@ func (pglr *PrimitiveGridLineRenderer) isHorisontalGridLineRequired(isTransparen
 		}
 	}
 
+	// check the other cell, bordering the gridline
 	rowVisIdx++
 	id = CellID{Row: rowVisIdx, Col: colVisIdx}
 	if info, exists := mm.visIdxMergeCache[id]; exists {
@@ -262,13 +255,6 @@ func (pglr *PrimitiveGridLineRenderer) isHorisontalGridLineRequired(isTransparen
 			if hasBackground, _ := mm.anchorHasBackgroundCache[anchorVisIdx]; hasBackground {
 				return false
 			}
-			/*
-				if needed, ok := isTransparent[anchorVisIdx]; ok {
-					if !needed {
-						return false
-					}
-				}
-			*/
 		} else {
 			// in the merged range somewhere
 			return false

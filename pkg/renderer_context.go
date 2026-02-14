@@ -36,18 +36,20 @@ type RenderContext struct {
 	ShowGridlines bool
 	ShowHeadings  bool
 
-	SheetRenderState RenderState
-	PaneRenderState  [RegionCount]RenderState
+	SheetRenderState    RenderState
+	PaneRenderState     [RegionCount]RenderState
+	PaneHasRenderedOnce [RegionCount]bool
 }
 
 func NewRenderContext(data *WorkSheetData) *RenderContext {
 	ctx := &RenderContext{
-		Data:             data,
-		CoordManager:     NewCoordinateManager(),
-		GroupManager:     NewGroupManager(),
-		ShowGridlines:    data.Settings.ShowGridlines,
-		ShowHeadings:     data.Settings.ShowHeadings,
-		SheetRenderState: RenderStateNotStarted,
+		Data:                data,
+		CoordManager:        NewCoordinateManager(),
+		GroupManager:        NewGroupManager(),
+		ShowGridlines:       data.Settings.ShowGridlines,
+		ShowHeadings:        data.Settings.ShowHeadings,
+		SheetRenderState:    RenderStateNotStarted,
+		PaneHasRenderedOnce: [4]bool{false, false, false, false},
 		PaneRenderState: [4]RenderState{
 			RenderStateNotStarted,
 			RenderStateNotStarted,

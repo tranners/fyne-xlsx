@@ -20,7 +20,7 @@ func NewRegionRenderer(ctx *RenderContext, fontMgr *FontManager) *RegionRenderer
 	}
 }
 
-func (rr *RegionRenderer) renderRegion(regionContainers RegionContainers, region GridRegion) {
+func (rr *RegionRenderer) renderCellsRegionDelta(regionContainers RegionContainers, region GridRegion) {
 
 	var remainingRowStart, remainingRowEnd int
 	vpCurrent := rr.ctx.Viewports[region]
@@ -130,14 +130,6 @@ func (rr *RegionRenderer) renderRegion(regionContainers RegionContainers, region
 
 	pr.renderVisibleMerges(regionContainers.Background, regionContainers.Data, vpCurrent, region)
 
-	/*
-		for itemId, configItem := range pr.textPrimitivesIndex[region] {
-			fmt.Printf("[ITEM-TEXT] Row:%d, Col:%d, ItemCount:%d, ItemId:%d, RecycleBinItems:%d\n",
-				itemId.Row, itemId.Col, len(pr.textPrimitivesIndex[region]), configItem, pr.RecycleBinItems(region))
-
-		}
-	*/
-
 	// every thing but main region need manually placed
 	if region != RegionMain {
 		for cellid, idx := range pr.textPrimitivesIndex[region] {
@@ -152,68 +144,94 @@ func (rr *RegionRenderer) renderRegion(regionContainers RegionContainers, region
 	}
 
 	pr.moveToCorner(region)
-	//}
+}
 
+func (rr *RegionRenderer) renderGridlinesRegionDelta(regionContainer RegionContainers, region GridRegion) {
 	glr := rr.gridlineRenderer
-	// gridlines
+	pr := rr.primitiveRenderer
+	cm := rr.ctx.CoordManager
 
-	if 1 == 1 {
-		if region == RegionMain {
-			cache := pr.BackgroundTransparencyStates(region)
-			if vpCurrent.FirstRowVisIdx > vpPrevious.FirstRowVisIdx {
-				glr.removeRowsTop(vpCurrent, vpPrevious, region)
-			}
+	var remainingRowStart, remainingRowEnd int
+	vpCurrent := rr.ctx.Viewports[region]
+	vpPrevious := rr.ctx.LastViewports[region]
 
-			if vpCurrent.LastRowVisIdx < vpPrevious.LastRowVisIdx {
-				glr.removeRowsBottom(vpCurrent, vpPrevious, region)
-			}
+	cache := pr.BackgroundTransparencyStates(region)
+	if vpCurrent.FirstRowVisIdx > vpPrevious.FirstRowVisIdx {
+		glr.removeRowsTop(vpCurrent, vpPrevious, region)
+	}
 
-			if vpCurrent.FirstColVisIdx > vpPrevious.FirstColVisIdx {
-				glr.cleanupLeftEdge(vpCurrent, vpPrevious, region)
-			}
+	if vpCurrent.LastRowVisIdx < vpPrevious.LastRowVisIdx {
+		glr.removeRowsBottom(vpCurrent, vpPrevious, region)
+	}
 
-			if vpCurrent.LastColVisIdx < vpPrevious.LastColVisIdx {
-				glr.cleanupRightEdge(vpCurrent, vpPrevious, region)
-			}
+	if vpCurrent.FirstColVisIdx > vpPrevious.FirstColVisIdx {
+		glr.cleanupLeftEdge(vpCurrent, vpPrevious, region)
+	}
 
-			if vpCurrent.FirstRowVisIdx < vpPrevious.FirstRowVisIdx {
-				glr.renderLeftEdge(regionContainers.Gridline, vpCurrent.FirstRowVisIdx, vpPrevious.FirstRowVisIdx-1, vpCurrent.FirstColVisIdx, vpCurrent.LastColVisIdx, cache, region)
-			}
+	if vpCurrent.LastColVisIdx < vpPrevious.LastColVisIdx {
+		glr.cleanupRightEdge(vpCurrent, vpPrevious, region)
+	}
 
-			if vpCurrent.LastRowVisIdx+1 > vpPrevious.LastRowVisIdx && vpCurrent.FirstColVisIdx <= vpCurrent.LastColVisIdx {
-				glr.renderLeftEdge(regionContainers.Gridline, vpPrevious.LastRowVisIdx+1, vpCurrent.LastRowVisIdx, vpCurrent.FirstColVisIdx, vpCurrent.LastColVisIdx, cache, region)
-			}
+	if vpCurrent.FirstRowVisIdx < vpPrevious.FirstRowVisIdx {
+		glr.renderLeftEdge(regionContainer.Gridline, vpCurrent.FirstRowVisIdx, vpPrevious.FirstRowVisIdx-1, vpCurrent.FirstColVisIdx, vpCurrent.LastColVisIdx, cache, region)
+	}
 
-			remainingRowStart = max(vpPrevious.FirstRowVisIdx, vpCurrent.FirstRowVisIdx)
-			remainingRowEnd = min(vpPrevious.LastRowVisIdx, vpCurrent.LastRowVisIdx)
+	if vpCurrent.LastRowVisIdx+1 > vpPrevious.LastRowVisIdx && vpCurrent.FirstColVisIdx <= vpCurrent.LastColVisIdx {
+		glr.renderLeftEdge(regionContainer.Gridline, vpPrevious.LastRowVisIdx+1, vpCurrent.LastRowVisIdx, vpCurrent.FirstColVisIdx, vpCurrent.LastColVisIdx, cache, region)
+	}
 
-			if vpCurrent.FirstColVisIdx < vpPrevious.FirstColVisIdx {
-				glr.renderLeftEdge(regionContainers.Gridline, remainingRowStart, remainingRowEnd, vpCurrent.FirstColVisIdx, vpPrevious.FirstColVisIdx-1, cache, region)
-			}
-			if vpCurrent.LastColVisIdx > vpPrevious.LastColVisIdx {
-				glr.renderRightEdge(regionContainers.Gridline, remainingRowStart, remainingRowEnd, vpPrevious.LastColVisIdx+1, vpCurrent.LastColVisIdx, cache, region)
-			}
+	remainingRowStart = max(vpPrevious.FirstRowVisIdx, vpCurrent.FirstRowVisIdx)
+	remainingRowEnd = min(vpPrevious.LastRowVisIdx, vpCurrent.LastRowVisIdx)
 
-			glr.stashInCorner(region)
-			if 1 == 1 {
-				fmt.Printf("[ITEM-LIST-STARTING]\n")
-				for itemId, configItem := range glr.hLineItems[region].ConfigLines {
-					if configItem.Row != -1 {
-						fmt.Printf("[ITEM-LIST] Row:%d, ColStart:%d, ColEnd:%d, ItemCount:%d, ItemId:%d, RecycleBinItems:%d\n",
-							configItem.Row, configItem.ColStart, configItem.ColEnd, len(glr.hLineItems[region].ConfigLines), itemId+1, glr.RecycleBinItems(region))
-					}
+	if vpCurrent.FirstColVisIdx < vpPrevious.FirstColVisIdx {
+		glr.renderLeftEdge(regionContainer.Gridline, remainingRowStart, remainingRowEnd, vpCurrent.FirstColVisIdx, vpPrevious.FirstColVisIdx-1, cache, region)
+	}
+	if vpCurrent.LastColVisIdx > vpPrevious.LastColVisIdx {
+		glr.renderRightEdge(regionContainer.Gridline, remainingRowStart, remainingRowEnd, vpPrevious.LastColVisIdx+1, vpCurrent.LastColVisIdx, cache, region)
+	}
+
+	glr.stashInCorner(region)
+	if 1 == 2 {
+		rowId := 6
+
+		found := true
+		fmt.Printf("[ITEM-LIST-STARTING]\n")
+		for found {
+			found = false
+			for itemId, configItem := range glr.hLineItems[region].ConfigLines {
+				if configItem.Row == rowId {
+					fmt.Printf("[ITEM-LIST] Row:%d, ColStart:%d, ColEnd:%d, ItemCount:%d, ItemId:%d, RecycleBinItems:%d\n",
+						configItem.Row, configItem.ColStart, configItem.ColEnd, len(glr.hLineItems[region].ConfigLines), itemId+1, glr.RecycleBinItems(region))
+					found = true
 				}
-				fmt.Printf("[ITEM-LIST-ENDING]\n")
+			}
+			rowId++
+		}
+		fmt.Printf("[ITEM-LIST-ENDING]\n")
+	}
+
+	if region != RegionMain {
+		for itemId, config := range glr.hLineItems[region].ConfigLines {
+			lineItem := glr.hLineItems[region].Lines[itemId]
+			if config.Row != -1 {
+				y := cm.GetRowPixelPosEndY(region, cm.GetRowModIdxFromVisIdx(config.Row))
+
+				lineItem.Position1.Y = y
+
+				lineItem.Position1.X = cm.GetColPixelPosX(region, cm.GetColModIdxFromVisIdx(config.ColStart))
+
+				lineItem.Position2.Y = y
+
+				lineItem.Position2.X = cm.GetColPixelPosEndX(region, cm.GetColModIdxFromVisIdx(config.ColEnd))
 			}
 		}
 	}
-
 }
 
-func (rr *RegionRenderer) renderFullRegion(regionContainers RegionContainers, region GridRegion) {
+func (rr *RegionRenderer) renderCellsRegionFull(regionContainers RegionContainers, region GridRegion) {
 
 	vp := rr.ctx.Viewports[region]
-	if 1 == 1 {
+	if 1 == 2 {
 		if region == RegionMain {
 			fmt.Printf("[VP-CURRENT-MAIN] FirstRow:%d, LastRow:%d, FirstCol:%d, LastCol:%d\n",
 				vp.FirstRowVisIdx, vp.LastRowVisIdx, vp.FirstColVisIdx, vp.LastColVisIdx)
@@ -261,4 +279,89 @@ func (rr *RegionRenderer) renderFullRegion(regionContainers RegionContainers, re
 
 	pr.moveToCorner(region)
 
+}
+
+func (rr *RegionRenderer) renderGridlinesRegionFull(regionContainer RegionContainers, region GridRegion) {
+	glr := rr.gridlineRenderer
+	pr := rr.primitiveRenderer
+
+	//	var remainingRowStart, remainingRowEnd int
+	vpCurrent := rr.ctx.Viewports[region]
+	//	vpPrevious := rr.ctx.LastViewports[region]
+
+	cache := pr.BackgroundTransparencyStates(region)
+
+	//if region == RegionMain {
+	glr.renderLeftEdge(regionContainer.Gridline, vpCurrent.FirstRowVisIdx, vpCurrent.LastRowVisIdx, vpCurrent.FirstColVisIdx, vpCurrent.LastColVisIdx, cache, region)
+
+	if region == RegionFixedCorner {
+		fmt.Printf("[ITEM-LIST-CORNER] ElementNo:%d\n", glr.hLineItems[region].ConfigLines)
+	}
+	//}
+	glr.stashInCorner(region)
+	if 1 == 2 {
+		rowId := 6
+
+		found := true
+		fmt.Printf("[ITEM-LIST-STARTING]\n")
+		for found {
+			found = false
+			for itemId, configItem := range glr.hLineItems[region].ConfigLines {
+				if configItem.Row == rowId {
+					fmt.Printf("[ITEM-LIST] Row:%d, ColStart:%d, ColEnd:%d, ItemCount:%d, ItemId:%d, RecycleBinItems:%d\n",
+						configItem.Row, configItem.ColStart, configItem.ColEnd, len(glr.hLineItems[region].ConfigLines), itemId+1, glr.RecycleBinItems(region))
+					found = true
+				}
+			}
+			rowId++
+		}
+		fmt.Printf("[ITEM-LIST-ENDING]\n")
+	}
+}
+
+func (r *GridRenderer) renderRegion(
+	region GridRegion,
+	containers RegionContainers,
+	forceFullRender bool,
+	scrollChange ScrollChange,
+) {
+
+	ctx := r.context
+	rr := r.regionRenderer
+
+	// Decision: FULL or DELTA render?
+	if !ctx.PaneHasRenderedOnce[region] {
+		// This region hasn't had initial render yet
+		if r.isValidViewport(region) {
+			// Viewport is ready → Do FULL render
+			rr.renderCellsRegionFull(containers, region)
+
+			rr.renderGridlinesRegionFull(containers, region)
+
+			ctx.PaneHasRenderedOnce[region] = true
+		}
+	} else {
+		// Region already had initial render → Use DELTA render from now on
+		shouldRender := forceFullRender
+
+		// Check if this region needs update based on scroll
+		switch region {
+		case RegionMain:
+			shouldRender = shouldRender || scrollChange.X || scrollChange.Y
+		case RegionFrozenRows:
+			shouldRender = shouldRender || scrollChange.X
+		case RegionFrozenCols:
+			shouldRender = shouldRender || scrollChange.Y
+		case RegionFixedCorner:
+			// Corner only updates on forceFullRender
+		}
+
+		if shouldRender {
+			rr.renderCellsRegionDelta(containers, region)
+			//if region == RegionMain {
+			rr.renderGridlinesRegionDelta(containers, region)
+			//}
+
+		}
+	}
 }
