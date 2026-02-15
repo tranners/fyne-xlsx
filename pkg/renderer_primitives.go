@@ -1,7 +1,6 @@
 package pkg
 
 import (
-	"fmt"
 	"image/color"
 
 	"fyne.io/fyne/v2"
@@ -439,24 +438,15 @@ func (pr *PrimitiveRenderer) BackgroundTransparencyStates(region GridRegion) Tra
 	isTransparent := make(map[CellID]bool)
 	vpCurrent := pr.ctx.Viewports[region]
 	vpPrevious := pr.ctx.LastViewports[region]
-	//vpPrevious := pr.ctx.SnapshotViewports[region]
 
 	cm := pr.ctx.CoordManager
 
-	tCell := CellID{Row: 11, Col: 23}
-
-	for rowVisIdx := vpCurrent.FirstRowVisIdx; rowVisIdx < vpPrevious.FirstRowVisIdx; rowVisIdx++ {
+	for rowVisIdx := vpCurrent.FirstRowVisIdx; rowVisIdx <= vpPrevious.FirstRowVisIdx; rowVisIdx++ {
 		for colVisIdx := vpCurrent.FirstColVisIdx; colVisIdx <= vpCurrent.LastColVisIdx; colVisIdx++ {
-			if rowVisIdx == 11 && colVisIdx == 23 {
-				//fmt.Println("here")
-			}
+
 			rowModIdx := cm.GetRowModIdxFromVisIdx(rowVisIdx)
 			colModIdx := cm.GetColModIdxFromVisIdx(colVisIdx)
 			cellID := CellID{Row: rowModIdx, Col: colModIdx}
-
-			if tCell == cellID {
-				//fmt.Println("Here")
-			}
 
 			_, hasBackground := pr.rectanglePrimitivesIndex[region][cellID]
 
@@ -464,17 +454,36 @@ func (pr *PrimitiveRenderer) BackgroundTransparencyStates(region GridRegion) Tra
 		}
 	}
 
-	for rowVisIdx := vpPrevious.LastRowVisIdx + 1; rowVisIdx <= vpCurrent.LastRowVisIdx; rowVisIdx++ {
-		for colVisIdx := vpCurrent.FirstColVisIdx; colVisIdx <= vpCurrent.LastColVisIdx; colVisIdx++ {
-			if rowVisIdx == 11 && colVisIdx == 23 {
-				//fmt.Println("here")
+	/*
+		if vpCurrent.LastRowVisIdx > vpPrevious.LastRowVisIdx {
+			// Include 1 row from previous viewport as buffer, BUT check boundary
+			startRow := vpPrevious.LastRowVisIdx
+			if vpPrevious.LastRowVisIdx < vpCurrent.FirstRowVisIdx {
+				startRow = vpCurrent.FirstRowVisIdx // Don't go before current viewport
 			}
+			endRow := vpCurrent.LastRowVisIdx
+
+			for rowVisIdx := startRow; rowVisIdx <= endRow; rowVisIdx++ {
+				for colVisIdx := vpCurrent.FirstColVisIdx; colVisIdx <= vpCurrent.LastColVisIdx; colVisIdx++ {
+					rowModIdx := cm.GetRowModIdxFromVisIdx(rowVisIdx)
+					colModIdx := cm.GetColModIdxFromVisIdx(colVisIdx)
+					cellID := CellID{Row: rowModIdx, Col: colModIdx}
+
+					_, hasBackground := pr.rectanglePrimitivesIndex[region][cellID]
+
+					isTransparent[CellID{rowVisIdx, colVisIdx}] = !hasBackground
+				}
+			}
+		}
+	*/
+
+	for rowVisIdx := vpPrevious.LastRowVisIdx; rowVisIdx <= vpCurrent.LastRowVisIdx; rowVisIdx++ {
+		for colVisIdx := vpCurrent.FirstColVisIdx; colVisIdx <= vpCurrent.LastColVisIdx; colVisIdx++ {
+
 			rowModIdx := cm.GetRowModIdxFromVisIdx(rowVisIdx)
 			colModIdx := cm.GetColModIdxFromVisIdx(colVisIdx)
 			cellID := CellID{Row: rowModIdx, Col: colModIdx}
-			if tCell == cellID {
-				//fmt.Println("Here")
-			}
+
 			_, hasBackground := pr.rectanglePrimitivesIndex[region][cellID]
 
 			isTransparent[CellID{rowVisIdx, colVisIdx}] = !hasBackground
@@ -486,16 +495,11 @@ func (pr *PrimitiveRenderer) BackgroundTransparencyStates(region GridRegion) Tra
 
 	for colVisIdx := vpCurrent.FirstColVisIdx; colVisIdx < vpPrevious.FirstColVisIdx; colVisIdx++ {
 		for rowVisIdx := remainingRowStart; rowVisIdx <= remainingRowEnd; rowVisIdx++ {
-			if rowVisIdx == 11 && colVisIdx == 23 {
-				//fmt.Println("here")
-			}
 
 			rowModIdx := cm.GetRowModIdxFromVisIdx(rowVisIdx)
 			colModIdx := cm.GetColModIdxFromVisIdx(colVisIdx)
 			cellID := CellID{Row: rowModIdx, Col: colModIdx}
-			if tCell == cellID {
-				//fmt.Println("Here")
-			}
+
 			_, hasBackground := pr.rectanglePrimitivesIndex[region][cellID]
 
 			isTransparent[CellID{rowVisIdx, colVisIdx}] = !hasBackground
@@ -504,18 +508,11 @@ func (pr *PrimitiveRenderer) BackgroundTransparencyStates(region GridRegion) Tra
 
 	for colVisIdx := vpPrevious.LastColVisIdx + 1; colVisIdx <= vpCurrent.LastColVisIdx; colVisIdx++ {
 		for rowVisIdx := remainingRowStart; rowVisIdx <= remainingRowEnd; rowVisIdx++ {
-			if rowVisIdx == 11 && colVisIdx == 23 {
-				//fmt.Println("here")
-			}
+
 			rowModIdx := cm.GetRowModIdxFromVisIdx(rowVisIdx)
 			colModIdx := cm.GetColModIdxFromVisIdx(colVisIdx)
 			cellID := CellID{Row: rowModIdx, Col: colModIdx}
-			tC := CellID{Row: 10, Col: 28}
-			if tC == cellID {
-				cellData := pr.ctx.Data.GridData[cellID]
-				//pr.
-				fmt.Println(cellData)
-			}
+
 			_, hasBackground := pr.rectanglePrimitivesIndex[region][cellID]
 
 			isTransparent[CellID{rowVisIdx, colVisIdx}] = !hasBackground

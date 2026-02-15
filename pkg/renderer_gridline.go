@@ -1,7 +1,6 @@
 package pkg
 
 import (
-	"fmt"
 	"image/color"
 
 	"fyne.io/fyne/v2"
@@ -16,7 +15,7 @@ const (
 	MODE_COMPLETED
 )
 
-var borderGridlineColor = color.NRGBA{R: 212, G: 212, B: 212, A: 255}
+var borderGridlineColor = color.NRGBA{R: 212, G: 212, B: 212, A: 225}
 
 type lineIndex struct {
 	P1 map[int]int
@@ -24,9 +23,10 @@ type lineIndex struct {
 }
 
 type hLineConfig struct {
-	Row      int
-	ColStart int
-	ColEnd   int
+	Row          int
+	ColStart     int
+	ColEnd       int
+	UnPositioned bool
 }
 
 type vLineConfig struct {
@@ -76,7 +76,6 @@ func NewPrimitiveGridlineRecycler() *PrimitiveGridlineRecycler {
 }
 
 type PrimitiveGridlineFlagger struct {
-	// No mutex needed - each region has isolated instance and is processed sequentially
 	items []int
 }
 
@@ -183,12 +182,6 @@ func (cyl *PrimitiveGridlineRecycler) Get() (PrimitiveGridlineRecyclerItem, bool
 }
 
 func (cyl *PrimitiveGridlineRecycler) Put(id int) {
-	// tmp check for a duplicate
-	for _, item := range cyl.items {
-		if item.id == id {
-			fmt.Printf("[ERR-DUPLICATE-ITEM] ID:%d\n", id)
-		}
-	}
 	item := PrimitiveGridlineRecyclerItem{id: id}
 	cyl.items = append(cyl.items, item)
 }
@@ -215,11 +208,11 @@ func (pglr *PrimitiveGridLineRenderer) stashInCorner(gridRegion GridRegion) {
 		delete(pglr.hLineIndex[gridRegion][objConfig.Row].P2, objConfig.ColEnd)
 
 		pglr.hLineItems[gridRegion].ConfigLines[itemId] = hLineConfig{
-			Row:      -1, // Invalid row
-			ColStart: -1,
-			ColEnd:   -1,
+			Row:          -1, // Invalid row
+			ColStart:     -1,
+			ColEnd:       -1,
+			UnPositioned: true,
 		}
-
 	}
 	pglr.flaggedItems[gridRegion].Reset()
 }
@@ -332,7 +325,7 @@ func (pglr *PrimitiveGridLineRenderer) cleanupRightEdge(vpCurrent, vpPrevious Vi
 }
 
 func (pglr *PrimitiveGridLineRenderer) addNewHorizontalLine(container *fyne.Container, rowVisIdx, colStartVisIdx, colEndVisIdx int, gridRegion GridRegion) {
-	cm := pglr.ctx.CoordManager
+	//cm := pglr.ctx.CoordManager
 	var lineItem *canvas.Line
 
 	if flaggedItemId, exist := pglr.flaggedItems[gridRegion].Get(); exist {
@@ -343,9 +336,10 @@ func (pglr *PrimitiveGridLineRenderer) addNewHorizontalLine(container *fyne.Cont
 		//	origItem.Row, origItem.ColStart, origItem.ColEnd, flaggedItemId, len(pglr.flaggedItems[gridRegion].items))
 
 		newItem := hLineConfig{
-			Row:      rowVisIdx,
-			ColStart: colStartVisIdx,
-			ColEnd:   colEndVisIdx,
+			Row:          rowVisIdx,
+			ColStart:     colStartVisIdx,
+			ColEnd:       colEndVisIdx,
+			UnPositioned: true,
 		}
 		//fmt.Printf("[FLAGGED-ITEM] OrigRow:%d, OrigCols:%d→%d, ItemID:%d, Flagged:%d\n",
 		//	rowVisIdx, colStartVisIdx, colEndVisIdx, flaggedItemId, len(pglr.flaggedItems[gridRegion].items))
@@ -366,9 +360,10 @@ func (pglr *PrimitiveGridLineRenderer) addNewHorizontalLine(container *fyne.Cont
 		primitiveGridLineRecyleItem, recycledItem := pglr.itemRecycler[gridRegion].Get()
 
 		newConfigItem := hLineConfig{
-			Row:      rowVisIdx,
-			ColStart: colStartVisIdx,
-			ColEnd:   colEndVisIdx,
+			Row:          rowVisIdx,
+			ColStart:     colStartVisIdx,
+			ColEnd:       colEndVisIdx,
+			UnPositioned: true,
 		}
 		if recycledItem {
 			lineItem = pglr.hLineItems[gridRegion].Lines[primitiveGridLineRecyleItem.id]
@@ -395,27 +390,16 @@ func (pglr *PrimitiveGridLineRenderer) addNewHorizontalLine(container *fyne.Cont
 			container.Add(lineItem)
 		}
 	}
-
-	y := cm.GetRowPixelPosEndY(gridRegion, cm.GetRowModIdxFromVisIdx(rowVisIdx))
-
-	lineItem.Position1.Y = y
-
-	lineItem.Position1.X = cm.GetColPixelPosX(gridRegion, cm.GetColModIdxFromVisIdx(colStartVisIdx))
-
-	lineItem.Position2.Y = y
-
-	lineItem.Position2.X = cm.GetColPixelPosEndX(gridRegion, cm.GetColModIdxFromVisIdx(colEndVisIdx))
-
 }
 
 func (pglr *PrimitiveGridLineRenderer) updatePosition1HorizontalLine(itemId, rowVisIdx, startVisColIdx int, gridRegion GridRegion) {
 
-	cm := pglr.ctx.CoordManager
 	lineItem := pglr.hLineItems[gridRegion].ConfigLines[itemId]
 
 	originalColStart := lineItem.ColStart
 
 	lineItem.ColStart = startVisColIdx
+	lineItem.UnPositioned = true
 
 	pglr.hLineItems[gridRegion].ConfigLines[itemId] = lineItem
 
@@ -423,19 +407,16 @@ func (pglr *PrimitiveGridLineRenderer) updatePosition1HorizontalLine(itemId, row
 
 	delete(pglr.hLineIndex[gridRegion][rowVisIdx].P1, originalColStart)
 
-	line := pglr.hLineItems[gridRegion].Lines[itemId]
-
-	line.Position1.X = cm.GetColPixelPosX(gridRegion, cm.GetColModIdxFromVisIdx(startVisColIdx))
 }
 
 func (pglr *PrimitiveGridLineRenderer) updatePosition2HorizontalLine(itemId, rowVisIdx, endVisColIdx int, gridRegion GridRegion) {
 
-	cm := pglr.ctx.CoordManager
 	lineItem := pglr.hLineItems[gridRegion].ConfigLines[itemId]
 
 	originalColEnd := lineItem.ColEnd
 
 	lineItem.ColEnd = endVisColIdx
+	lineItem.UnPositioned = true
 
 	pglr.hLineItems[gridRegion].ConfigLines[itemId] = lineItem
 
@@ -443,9 +424,6 @@ func (pglr *PrimitiveGridLineRenderer) updatePosition2HorizontalLine(itemId, row
 
 	delete(pglr.hLineIndex[gridRegion][rowVisIdx].P2, originalColEnd)
 
-	line := pglr.hLineItems[gridRegion].Lines[itemId]
-
-	line.Position2.X = cm.GetColPixelPosEndX(gridRegion, cm.GetColModIdxFromVisIdx(endVisColIdx))
 }
 
 func (pglr *PrimitiveGridLineRenderer) renderLeftEdge(container *fyne.Container,
@@ -459,10 +437,6 @@ func (pglr *PrimitiveGridLineRenderer) renderLeftEdge(container *fyne.Container,
 	var endVisColIdx int
 
 	for rowVisIdx := rowStart; rowVisIdx <= rowEnd; rowVisIdx++ {
-
-		//if rowVisIdx != 14 {
-		//	continue
-		//}
 
 		if _, exist := pglr.hLineIndex[gridRegion][rowVisIdx]; !exist {
 			pglr.hLineIndex[gridRegion][rowVisIdx] = lineIndex{
@@ -524,9 +498,6 @@ func (pglr *PrimitiveGridLineRenderer) renderRightEdge(container *fyne.Container
 	var endVisColIdx int
 
 	for rowVisIdx := rowStart; rowVisIdx <= rowEnd; rowVisIdx++ {
-		//if rowVisIdx != 14 {
-		//	continue
-		//}
 		if _, exist := pglr.hLineIndex[gridRegion][rowVisIdx]; !exist {
 			pglr.hLineIndex[gridRegion][rowVisIdx] = lineIndex{
 				P1: make(map[int]int),

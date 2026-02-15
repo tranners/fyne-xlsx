@@ -12,11 +12,15 @@ import (
 
 // corner
 var headerBackgroundColor = color.NRGBA{R: 243, G: 243, B: 243, A: 255} // #D9D9D9 - Light gray
-var headerBorderColor = color.NRGBA{R: 198, G: 198, B: 198, A: 255}
+// var headerBorderColor = color.NRGBA{R: 198, G: 198, B: 198, A: 225}
+var headerBorderColor = color.NRGBA{R: 212, G: 212, B: 212, A: 225}
 
 // headers
-var headerBorderLightColor = color.NRGBA{R: 198, G: 198, B: 198, A: 120}
-var headerBorderDarkColor = color.NRGBA{R: 198, G: 198, B: 198, A: 255}
+var headerBorderLightColor = color.NRGBA{R: 212, G: 212, B: 212, A: 225}
+
+// var headerBorderLightColor = color.NRGBA{R: 198, G: 198, B: 198, A: 120}
+// var headerBorderDarkColor = color.NRGBA{R: 198, G: 198, B: 198, A: 255}
+var headerBorderDarkColor = color.NRGBA{R: 212, G: 212, B: 212, A: 225}
 
 type HeaderCarcuss struct {
 	Container    *fyne.Container
@@ -184,7 +188,7 @@ func (hr *HeaderRenderer) renderFixedColumnHeaders(colHdrFixedContainer *fyne.Co
 	ctx := hr.ctx
 	cm := ctx.CoordManager
 
-	for colVisIdx := 1; colVisIdx <= cm.GetVisibleFrozenColumns(); colVisIdx++ {
+	for colVisIdx := 1; colVisIdx <= cm.GetFrozenColumns(); colVisIdx++ {
 		colModIdx := cm.GetColModIdxFromVisIdx(colVisIdx)
 		hr.createColumnHeaderItem(colHdrFixedContainer, hr.colHeadersFixed, colModIdx)
 	}
@@ -199,7 +203,7 @@ func (hr *HeaderRenderer) renderFixedRowHeaders(rowHdrFixedContainer *fyne.Conta
 	ctx := hr.ctx
 	cm := ctx.CoordManager
 
-	for rowVisIdx := 1; rowVisIdx <= cm.GetVisibleFrozenRows(); rowVisIdx++ {
+	for rowVisIdx := 1; rowVisIdx <= cm.GetFrozenRows(); rowVisIdx++ {
 		rowModIdx := cm.GetRowModIdxFromVisIdx(rowVisIdx)
 		hr.createRowHeaderItem(rowHdrFixedContainer, hr.rowHeadersFixed, rowModIdx)
 	}
@@ -218,8 +222,6 @@ func (hr *HeaderRenderer) createColumnHeaderItem(content *fyne.Container, header
 	cm := ctx.CoordManager
 
 	width := cm.GetWidthByModIdx(colModIdx)
-
-	//header := ctx.HeaderPool.Get().(*HeaderCarcuss)
 
 	recycler := hr.recyclerColumns
 	header, recycled := recycler.Get()
@@ -248,7 +250,6 @@ func (hr *HeaderRenderer) createRowHeaderItem(content *fyne.Container, headerMap
 
 	height := cm.GetHeightByModIdx(rowModIdx)
 
-	//header := ctx.HeaderPool.Get().(*HeaderCarcuss)
 	recycler := hr.recyclerRows
 	header, recycled := recycler.Get()
 
@@ -272,11 +273,8 @@ func (r *HeaderRenderer) removeHeaderItem(recycler *HeaderRecycler, cellMap map[
 
 		cell.Container.Hide()
 
-		//recycler := r.recyclerRows
 		recycler.Put(cell)
 
-		//content.Remove(cell.Container)
-		//pool.Put(cell)
 		delete(cellMap, modIdx)
 	}
 }

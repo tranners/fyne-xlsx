@@ -34,9 +34,6 @@ type CoordinateManager struct {
 	visColMap      []ColLayout
 	modToVisColMap []int
 
-	lastFreezeColVisIdx int
-	lastFreezeRowVisIdx int
-
 	totalVisHeight float32
 	totalVisWidth  float32
 
@@ -80,15 +77,12 @@ func (cm *CoordinateManager) rebuildRowLayout(grid *WorkSheetData) {
 			})
 			cm.modToVisRowMap[modIdx] = len(cm.visRowMap) - 1
 			y += height
-			if modIdx < cm.freezeRowSplit {
-				cm.lastFreezeRowVisIdx++
-			}
 		} else {
 			cm.modToVisRowMap[modIdx] = -1
 		}
 	}
 	cm.totalVisHeight = y
-	cm.freezeRowPixelEnd = cm.visRowMap[cm.lastFreezeRowVisIdx].PixelEnd
+	cm.freezeRowPixelEnd = cm.visRowMap[cm.freezeRowSplit].PixelEnd
 }
 
 func (cm *CoordinateManager) rebuildColLayout(grid *WorkSheetData) {
@@ -111,15 +105,12 @@ func (cm *CoordinateManager) rebuildColLayout(grid *WorkSheetData) {
 			})
 			cm.modToVisColMap[modIdx] = len(cm.visColMap) - 1
 			x += width
-			if modIdx < cm.freezeColSplit {
-				cm.lastFreezeColVisIdx++
-			}
 		} else {
 			cm.modToVisColMap[modIdx] = -1
 		}
 	}
 	cm.totalVisWidth = x
-	cm.freezeColPixelEnd = cm.visColMap[cm.lastFreezeColVisIdx].PixelEnd
+	cm.freezeColPixelEnd = cm.visColMap[cm.freezeColSplit].PixelEnd
 }
 func (cm *CoordinateManager) GetColPixelPosEndX(region GridRegion, colModIdx int) float32 {
 	colVisIdx := cm.modToVisColMap[colModIdx]
@@ -227,6 +218,16 @@ func (cm *CoordinateManager) SetScrollOffset(offset fyne.Position) {
 	cm.scrollOffset = offset
 }
 
+func (cm *CoordinateManager) GetScrollDeltaY() float32 {
+	//return cm.prevScrollOffset.Y - cm.scrollOffset.Y
+	return cm.scrollOffset.Y - cm.prevScrollOffset.Y
+}
+
+func (cm *CoordinateManager) GetScrollDeltaX() float32 {
+	//return cm.prevScrollOffset.X - cm.scrollOffset.X
+	return cm.scrollOffset.X - cm.prevScrollOffset.X
+}
+
 func (cm *CoordinateManager) GetScrollableSize() fyne.Size {
 	freezeColOffset, freezeRowOffset := cm.GetFreezeOffsets()
 	return fyne.NewSize(
@@ -237,12 +238,6 @@ func (cm *CoordinateManager) GetScrollableSize() fyne.Size {
 
 func (cm *CoordinateManager) CalculateViewports(scrollSize fyne.Size) [4]Viewport {
 
-	//if scrollSize.Width <= 0 || scrollSize.Height <= 0 {
-	//	// Return sentinel values
-	//	sentinel := Viewport{-1, -1, -1, -1}
-	//	return [4]Viewport{sentinel, sentinel, sentinel, sentinel}
-	//}
-
 	mainFirstRow := cm.findFirstVisRowIdx()
 	mainLastRow := cm.findLastVisRowIdx(scrollSize.Height)
 	mainFirstCol := cm.findFirstVisColIdx()
@@ -252,14 +247,14 @@ func (cm *CoordinateManager) CalculateViewports(scrollSize fyne.Size) [4]Viewpor
 
 	viewports[RegionFixedCorner] = Viewport{
 		FirstRowVisIdx: 1,
-		LastRowVisIdx:  cm.lastFreezeRowVisIdx,
+		LastRowVisIdx:  cm.freezeRowSplit,
 		FirstColVisIdx: 1,
-		LastColVisIdx:  cm.lastFreezeColVisIdx,
+		LastColVisIdx:  cm.freezeColSplit,
 	}
 
 	viewports[RegionFrozenRows] = Viewport{
 		FirstRowVisIdx: 1,
-		LastRowVisIdx:  cm.lastFreezeRowVisIdx,
+		LastRowVisIdx:  cm.freezeRowSplit,
 		FirstColVisIdx: mainFirstCol,
 		LastColVisIdx:  mainLastCol,
 	}
@@ -268,7 +263,7 @@ func (cm *CoordinateManager) CalculateViewports(scrollSize fyne.Size) [4]Viewpor
 		FirstRowVisIdx: mainFirstRow,
 		LastRowVisIdx:  mainLastRow,
 		FirstColVisIdx: 1,
-		LastColVisIdx:  cm.lastFreezeColVisIdx,
+		LastColVisIdx:  cm.freezeColSplit,
 	}
 
 	viewports[RegionMain] = Viewport{
@@ -385,18 +380,19 @@ func (cm *CoordinateManager) GetWidthByModIdx(colModIdx int) float32 {
 	return width
 }
 
-func (cm *CoordinateManager) GetVisibleFrozenRows() int {
-	return cm.lastFreezeRowVisIdx
+func (cm *CoordinateManager) GetFrozenRows() int {
+	return cm.freezeRowSplit
 }
-func (cm *CoordinateManager) HasVisibleFrozenRows() bool {
-	return cm.lastFreezeRowVisIdx > 0
+func (cm *CoordinateManager) HasFrozenRows() bool {
+	return cm.freezeColSplit > 0
 }
 
-func (cm *CoordinateManager) GetVisibleFrozenColumns() int {
-	return cm.lastFreezeColVisIdx
+func (cm *CoordinateManager) GetFrozenColumns() int {
+	return cm.freezeColSplit
 }
-func (cm *CoordinateManager) HasVisibleFrozenColumns() bool {
-	return cm.lastFreezeColVisIdx > 0
+
+func (cm *CoordinateManager) HasFrozenColumns() bool {
+	return cm.freezeColSplit > 0
 }
 
 func (cm *CoordinateManager) FindFirstVisibleColInRange(startModIdx, endModIdx int) int {
@@ -497,24 +493,6 @@ func (cm *CoordinateManager) FindNextVisibleColModIdxByModIdx(colModIdx int) int
 	return cm.GetColModIdxFromVisIdx(visIdx + 1)
 }
 
-/*
-func (cm *CoordinateManager) FindNextVisibleColFromModIdx(colModIdx int) int {
-	currentVisIdx := cm.GetColVisIdxFromModIdx(colModIdx)
-
-	if currentVisIdx == -1 {
-		return -1
-	}
-
-	nextVisIdx := currentVisIdx + 1
-
-	if nextVisIdx >= len(cm.visColMap) {
-		return -1
-	}
-
-	return cm.GetColModIdxFromVisIdx(nextVisIdx)
-}
-*/
-
 func (cm *CoordinateManager) FindNextVisibleRowModIdxByModIdx(rowModIdx int) int {
 	visIdx := cm.GetRowVisIdxFromModIdx(rowModIdx)
 	if visIdx == -1 || visIdx+1 >= len(cm.visRowMap) {
@@ -522,22 +500,3 @@ func (cm *CoordinateManager) FindNextVisibleRowModIdxByModIdx(rowModIdx int) int
 	}
 	return cm.GetRowModIdxFromVisIdx(visIdx + 1)
 }
-
-/*
-func (cm *CoordinateManager) FindNextVisibleRowFromModIdx(rowModIdx int) int {
-
-	currentVisIdx := cm.GetRowVisIdxFromModIdx(rowModIdx)
-
-	if currentVisIdx == -1 {
-		return -1
-	}
-
-	nextVisIdx := currentVisIdx + 1
-
-	if nextVisIdx >= len(cm.visRowMap) {
-		return -1
-	}
-
-	return cm.GetRowModIdxFromVisIdx(nextVisIdx)
-}
-*/

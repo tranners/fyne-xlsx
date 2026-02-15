@@ -17,6 +17,22 @@ const (
 	RegionFrozenCols
 )
 
+// String returns the string representation of the GridRegion
+func (gr GridRegion) String() string {
+	switch gr {
+	case RegionMain:
+		return "RegionMain"
+	case RegionFixedCorner:
+		return "RegionFixedCorner"
+	case RegionFrozenRows:
+		return "RegionFrozenRows"
+	case RegionFrozenCols:
+		return "RegionFrozenCols"
+	default:
+		return fmt.Sprintf("GridRegion(%d)", gr)
+	}
+}
+
 type RegionContainers struct {
 	Background *fyne.Container
 	Gridline   *fyne.Container
@@ -134,8 +150,10 @@ func (r *GridRenderer) renderOrchestrator(forceFullRender bool) {
 	// ============================================================
 	r.renderRegion(RegionMain, r.regionMain, forceFullRender, scrollChange)
 
-	hasFrozenCols := cm.HasVisibleFrozenColumns()
-	hasFrozenRows := cm.HasVisibleFrozenRows()
+	//hasFrozenCols := cm.HasVisibleFrozenColumns()
+	//hasFrozenRows := cm.HasVisibleFrozenRows()
+	hasFrozenCols := cm.HasFrozenColumns()
+	hasFrozenRows := cm.HasFrozenRows()
 
 	// Fixed Corner (only if both frozen rows/cols exist)
 	if hasFrozenCols && hasFrozenRows {
@@ -339,9 +357,10 @@ func (r *GridRenderer) Layout(objects []fyne.CanvasObject, size fyne.Size) {
 	gm := r.context.GroupManager
 
 	// Determine freeze pane state
-	hasRowFreeze := cm.GetVisibleFrozenRows() > 0
-	hasColFreeze := cm.GetVisibleFrozenColumns() > 0
-
+	//hasRowFreeze := cm.GetVisibleFrozenRows() > 0
+	//hasColFreeze := cm.GetVisibleFrozenColumns() > 0
+	hasRowFreeze := cm.GetFrozenRows() > 0
+	hasColFreeze := cm.GetFrozenColumns() > 0
 	// Determine group header state
 	hasRowGroups := len(gm.rowGroups) > 0
 	hasColGroups := len(gm.colGroups) > 0
