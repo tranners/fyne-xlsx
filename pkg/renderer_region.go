@@ -257,19 +257,19 @@ func (rr *RegionRenderer) renderGridlinesRegionDelta(regionContainer RegionConta
 
 	cache := pr.BackgroundTransparencyStates(region)
 	if vpCurrent.FirstRowVisIdx > vpPrevious.FirstRowVisIdx {
-		glr.removeRowsTop(vpCurrent, vpPrevious, region)
+		glr.removeRowsTopH(vpCurrent, vpPrevious, region)
 	}
 
 	if vpCurrent.LastRowVisIdx < vpPrevious.LastRowVisIdx {
-		glr.removeRowsBottom(vpCurrent, vpPrevious, region)
+		glr.removeRowsBottomH(vpCurrent, vpPrevious, region)
 	}
 
 	if vpCurrent.FirstColVisIdx > vpPrevious.FirstColVisIdx {
-		glr.cleanupLeftEdge(vpCurrent, vpPrevious, region)
+		glr.cleanupLeftEdgeH(vpCurrent, vpPrevious, region)
 	}
 
 	if vpCurrent.LastColVisIdx < vpPrevious.LastColVisIdx {
-		glr.cleanupRightEdge(vpCurrent, vpPrevious, region)
+		glr.cleanupRightEdgeH(vpCurrent, vpPrevious, region)
 	}
 
 	if vpCurrent.FirstRowVisIdx < vpPrevious.FirstRowVisIdx {
@@ -290,24 +290,43 @@ func (rr *RegionRenderer) renderGridlinesRegionDelta(regionContainer RegionConta
 		glr.renderRightEdge(regionContainer.Gridline, remainingRowStart, remainingRowEnd, vpPrevious.LastColVisIdx+1, vpCurrent.LastColVisIdx, cache, region)
 	}
 
-	glr.stashInCorner(region)
-	if 1 == 2 {
-		rowId := 6
-
-		found := true
-		fmt.Printf("[ITEM-LIST-STARTING]\n")
-		for found {
-			found = false
-			for itemId, configItem := range glr.hLineItems[region].ConfigLines {
-				if configItem.Row == rowId {
-					fmt.Printf("[ITEM-LIST] Row:%d, ColStart:%d, ColEnd:%d, ItemCount:%d, ItemId:%d, RecycleBinItems:%d\n",
-						configItem.Row, configItem.ColStart, configItem.ColEnd, len(glr.hLineItems[region].ConfigLines), itemId+1, glr.RecycleBinItems(region))
-					found = true
-				}
+	glr.stashInCornerH(region)
+	lower := 10
+	upper := -99
+	if 1 == 1 {
+		for itemId, _ := range glr.hLineItems[region].ConfigLines {
+			if itemId < lower {
+				lower = itemId
 			}
-			rowId++
+			if itemId > upper {
+				upper = itemId
+			}
 		}
-		fmt.Printf("[ITEM-LIST-ENDING]\n")
+
+		for i := lower; i <= upper; i++ {
+			//	configItem := glr.hLineItems[region].ConfigLines[i]
+			//	fmt.Printf("[ITEM-LIST] Region:%s, Itemid:%d, Row:%d, ColStart:%d, ColEnd:%d, ItemCount:%d, ItemId:%d, RecycleBinItems:%d\n",
+			//		region.String(), i, configItem.Row, configItem.ColStart, configItem.ColEnd, len(glr.hLineItems[region].ConfigLines), i, glr.RecycleBinItems(region))
+		}
+		/*
+			rowId := 6
+
+			found := true
+
+			fmt.Printf("[ITEM-LIST-STARTING]\n")
+			for found {
+				found = false
+				for itemId, configItem := range glr.hLineItems[region].ConfigLines {
+					if configItem.Row == rowId {
+						fmt.Printf("[ITEM-LIST] Row:%d, ColStart:%d, ColEnd:%d, ItemCount:%d, ItemId:%d, RecycleBinItems:%d\n",
+							configItem.Row, configItem.ColStart, configItem.ColEnd, len(glr.hLineItems[region].ConfigLines), itemId+1, glr.RecycleBinItems(region))
+						found = true
+					}
+				}
+				rowId++
+			}
+		*/
+		//fmt.Printf("[ITEM-LIST-ENDING]\n")
 		fmt.Printf("[ITEM-LIST-STATS] Region:%s, count:%d\n", region.String(), len(glr.hLineItems[region].ConfigLines))
 	}
 
@@ -328,7 +347,7 @@ func (rr *RegionRenderer) renderGridlinesRegionFull(regionContainer RegionContai
 	if region == RegionFixedCorner {
 		fmt.Printf("[ITEM-LIST-CORNER] ElementNo:%d\n", glr.hLineItems[region].ConfigLines)
 	}
-	glr.stashInCorner(region)
+	glr.stashInCornerH(region)
 	if 1 == 2 {
 		rowId := 6
 
@@ -339,7 +358,7 @@ func (rr *RegionRenderer) renderGridlinesRegionFull(regionContainer RegionContai
 			for itemId, configItem := range glr.hLineItems[region].ConfigLines {
 				if configItem.Row == rowId {
 					fmt.Printf("[ITEM-LIST] Row:%d, ColStart:%d, ColEnd:%d, ItemCount:%d, ItemId:%d, RecycleBinItems:%d\n",
-						configItem.Row, configItem.ColStart, configItem.ColEnd, len(glr.hLineItems[region].ConfigLines), itemId+1, glr.RecycleBinItems(region))
+						configItem.Row, configItem.ColStart, configItem.ColEnd, len(glr.hLineItems[region].ConfigLines), itemId+1, glr.RecycleBinItemsH(region))
 					found = true
 				}
 			}
@@ -376,8 +395,6 @@ func (rr *RegionRenderer) positionGridlines(region GridRegion) {
 		}
 		rr.frameCounters[region] = 0
 	} else {
-		// MIXED: absolute for UnPositioned, delta for positioned
-
 		for itemId, config := range glr.hLineItems[region].ConfigLines {
 			if config.Row != -1 {
 				if config.UnPositioned {

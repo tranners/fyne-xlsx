@@ -219,12 +219,10 @@ func (cm *CoordinateManager) SetScrollOffset(offset fyne.Position) {
 }
 
 func (cm *CoordinateManager) GetScrollDeltaY() float32 {
-	//return cm.prevScrollOffset.Y - cm.scrollOffset.Y
 	return cm.scrollOffset.Y - cm.prevScrollOffset.Y
 }
 
 func (cm *CoordinateManager) GetScrollDeltaX() float32 {
-	//return cm.prevScrollOffset.X - cm.scrollOffset.X
 	return cm.scrollOffset.X - cm.prevScrollOffset.X
 }
 
