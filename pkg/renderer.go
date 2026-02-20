@@ -150,8 +150,6 @@ func (r *GridRenderer) renderOrchestrator(forceFullRender bool) {
 	// ============================================================
 	r.renderRegion(RegionMain, r.regionMain, forceFullRender, scrollChange)
 
-	//hasFrozenCols := cm.HasVisibleFrozenColumns()
-	//hasFrozenRows := cm.HasVisibleFrozenRows()
 	hasFrozenCols := cm.HasFrozenColumns()
 	hasFrozenRows := cm.HasFrozenRows()
 

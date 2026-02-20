@@ -108,6 +108,7 @@ func (ctx *RenderContext) DataChanged() {
 	gm := ctx.GroupManager
 	mm := ctx.MergeManager
 
+	cm.SetSplitCell(ctx.Data)
 	cm.rebuildColLayout(ctx.Data)
 	cm.rebuildRowLayout(ctx.Data)
 

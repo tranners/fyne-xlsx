@@ -1,6 +1,7 @@
 package pkg
 
 import (
+	"fmt"
 	"image/color"
 
 	"fyne.io/fyne/v2"
@@ -176,7 +177,7 @@ func (pf *PrimitiveFlagger) Reset() {
 func (pcr *PrimitiveRenderer) removeMergesOutsideViewport(viewport Viewport, gridRegion GridRegion) {
 	mm := pcr.ctx.MergeManager
 
-	for anchorCellModId := range mm.anchorToSize {
+	mm.ForEachVisibleMerge(func(anchorCellModId CellID) {
 		isVisible := mm.IsMergeInViewport(anchorCellModId, viewport)
 
 		if !isVisible {
@@ -189,7 +190,7 @@ func (pcr *PrimitiveRenderer) removeMergesOutsideViewport(viewport Viewport, gri
 				pcr.flagTextPrimitives[gridRegion].Put(anchorCellModId)
 			}
 		}
-	}
+	})
 }
 
 func (pcr *PrimitiveRenderer) removeCell(cellModId CellID, gridRegion GridRegion) {
@@ -199,14 +200,7 @@ func (pcr *PrimitiveRenderer) removeCell(cellModId CellID, gridRegion GridRegion
 	if _, merged := mm.IsCellMerged(cellModId); merged {
 		return
 	}
-	/*
-		anchor, isMerged := mm.GetCellAnchor(cellModId)
-		if isMerged && anchor == cellModId { // Is This Cell an anchor
-			if mm.IsMergeInViewport(anchor, pcr.ctx.Viewports[gridRegion]) {
-				return // suppress removal
-			}
-		}
-	*/
+
 	if _, exists := pcr.rectanglePrimitivesIndex[gridRegion][cellModId]; exists {
 		pcr.flagRectanglePrimitives[gridRegion].Put(cellModId)
 	}
@@ -220,19 +214,11 @@ func (pcr *PrimitiveRenderer) removeCell(cellModId CellID, gridRegion GridRegion
 func (pcr *PrimitiveRenderer) renderVisibleMerges(backgroundContainer, dataContainer *fyne.Container, viewport Viewport, gridRegion GridRegion) {
 	mm := pcr.ctx.MergeManager
 
-	/*
-		for anchorCellModId := range mm.anchorToSize {
-			isVisible := mm.IsMergeInViewport(anchorCellModId, viewport)
+	mm.ForEachVisibleMerge(func(anchorCellModId CellID) {
 
-			_, rectExists := pcr.rectanglePrimitivesIndex[gridRegion][anchorCellModId]
-			_, textExists := pcr.textPrimitivesIndex[gridRegion][anchorCellModId]
-
-			if !isVisible && (rectExists || textExists) {
-				pcr.removeCell(anchorCellModId, gridRegion)
-			}
+		if anchorCellModId.Row == 6 && anchorCellModId.Col == 21 {
+			fmt.Println("here")
 		}
-	*/
-	for anchorCellModId := range mm.anchorToSize {
 		isVisible := mm.IsMergeInViewport(anchorCellModId, viewport)
 
 		_, rectExists := pcr.rectanglePrimitivesIndex[gridRegion][anchorCellModId]
@@ -245,13 +231,15 @@ func (pcr *PrimitiveRenderer) renderVisibleMerges(backgroundContainer, dataConta
 				cellData.Style.Fill.BgColor != color.Transparent && !rectExists
 
 			needText := cellData != nil && cellData.Value != "" && !textExists
-
+			if anchorCellModId.Row == 3 {
+				fmt.Println("Hello")
+			}
 			pcr.addPrimitivesToCell(backgroundContainer, dataContainer,
 				anchorCellModId,
 				gridRegion, true, needRect, needText, cellData)
 
 		}
-	}
+	})
 }
 
 func (pcr *PrimitiveRenderer) addPrimitivesToCell(backgroundContainer, dataContainer *fyne.Container, id CellID, gridRegion GridRegion, isAnchorCell bool, isRectRequired bool, isTextRequired bool, cellData *CellData) {
@@ -349,13 +337,17 @@ func (pcr *PrimitiveRenderer) addCell(backgroundContainer *fyne.Container, dataC
 
 	mm := pcr.ctx.MergeManager
 
+	if rowModIdx == 6 && colModIdx == 21 {
+		fmt.Println("here")
+	}
+
 	//if _, isMerged := mm.IsCellMerged(id); isMerged {
 	//part of merged range; but on the anchor cell
 	//	return
 	//}
 	// Skip ANYTHING merge-related (children OR anchors)
-	if _, exists := mm.cellToMergeAnchor[id]; exists {
-		return // Let renderVisibleMerges() handle all merge logic
+	if _, exists := mm.IsCellMerged(id); exists {
+		return
 	}
 
 	isMergeAnchor := mm.IsVisibleMergeAnchor(id)

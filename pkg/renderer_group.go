@@ -341,7 +341,8 @@ func (gr *GroupRenderer) duplicateToFrozenColumn(colGroupFrozenContainer *fyne.C
 	cm := ctx.CoordManager
 	gm := ctx.GroupManager
 
-	freezeColSplit := cm.freezeColSplit
+	freezeColSplit := cm.GetFrozenColumns()
+	//freezeColSplit := cm.freezeVisColSplit
 
 	for id, scrollIndicator := range gr.colGroupsScroll {
 		group := gm.colGroupIndex[id]
@@ -385,7 +386,8 @@ func (gr *GroupRenderer) duplicateToFrozenRow(rowGroupFrozenContainer *fyne.Cont
 	cm := ctx.CoordManager
 	gm := ctx.GroupManager
 
-	freezeRowSplit := cm.freezeRowSplit
+	//freezeRowSplit := cm.freezeVisRowSplit
+	freezeRowSplit := cm.GetFrozenRows()
 
 	for id, scrollIndicator := range gr.rowGroupsScroll {
 		group := gm.rowGroupIndex[id]

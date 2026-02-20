@@ -14,7 +14,7 @@ import (
 
 func main() {
 
-	filename := "specimen.xlsx"
+	filename := "specimen-big.xlsx"
 	file, _ := os.Open(filename)
 	defer file.Close()
 

@@ -9,12 +9,14 @@ import (
 )
 
 type MergeManager struct {
+	// Model Anchor / Model Merged Ranges
+	anchorToModelRange map[CellID]*MergeRange
+
+	// key any cell reference, withing a merged range
 	cellToMergeAnchor map[CellID]CellID
-	anchorToRange     map[CellID]*MergeRange
-	merges            []NewMergeRange
-	//visibleMerges     []VisibleMerge
-	visibleMergeSet map[CellID]bool
-	anchorToSize    map[CellID]fyne.Size
+
+	// key merged range Anchor cell
+	mergedeSizeByModAnchor map[CellID]fyne.Size
 
 	// used in the gridlines
 	visIdxMergeCache map[CellID]VisIdxMergeInfo
@@ -25,7 +27,7 @@ type MergeManager struct {
 	data *WorkSheetData
 }
 
-type NewMergeRange struct {
+type MergeModRange struct {
 	StartModelRow int
 	StartModelCol int
 	RowSpan       int
@@ -41,28 +43,23 @@ type VisIdxMergeInfo struct {
 
 func NewMergeManager(cm *CoordinateManager, data *WorkSheetData) *MergeManager {
 	m := &MergeManager{cm: cm, data: data,
-		anchorToRange:     make(map[CellID]*MergeRange),
-		cellToMergeAnchor: make(map[CellID]CellID),
-		visibleMergeSet:   make(map[CellID]bool),
-		anchorToSize:      make(map[CellID]fyne.Size),
+		anchorToModelRange:     make(map[CellID]*MergeRange),
+		cellToMergeAnchor:      make(map[CellID]CellID),
+		mergedeSizeByModAnchor: make(map[CellID]fyne.Size),
 	}
 
 	return m
 }
 
 func (mm *MergeManager) buildMergeLookup(mergeCells []MergeRange) {
-
-	//x := mm.c
 	cm := mm.cm
 
 	data := mm.data
 
-	mm.merges = mm.merges[:0]
 	mm.cellToMergeAnchor = make(map[CellID]CellID)
-	mm.anchorToRange = make(map[CellID]*MergeRange)
+	mm.anchorToModelRange = make(map[CellID]*MergeRange)
 	mm.visIdxMergeCache = make(map[CellID]VisIdxMergeInfo)
-	mm.visibleMergeSet = make(map[CellID]bool)
-	mm.anchorToSize = make(map[CellID]fyne.Size)
+	mm.mergedeSizeByModAnchor = make(map[CellID]fyne.Size)
 	mm.anchorHasBackgroundCache = make(map[CellID]bool)
 
 	var startVisRow int
@@ -71,29 +68,29 @@ func (mm *MergeManager) buildMergeLookup(mergeCells []MergeRange) {
 	var endVisCol int
 
 	for _, merge := range mergeCells {
-		startRow, startCol, endRow, endCol, err := merge.GetBounds()
+		startModRow, startModCol, endModRow, endModCol, err := merge.GetMergeModBounds()
 		if err != nil {
 			continue
 		}
 
-		anchor := CellID{Row: startRow, Col: startCol}
-		mm.anchorToRange[anchor] = &merge
+		anchor := CellID{Row: startModRow, Col: startModCol}
+		mm.anchorToModelRange[anchor] = &merge
 
-		newMergeRange := NewMergeRange{
-			StartModelRow: startRow,
-			StartModelCol: startCol,
-			RowSpan:       endRow - startRow + 1,
-			ColSpan:       endCol - startCol + 1,
+		mergeModRange := MergeModRange{
+			StartModelRow: startModRow,
+			StartModelCol: startModCol,
+			RowSpan:       endModRow - startModRow + 1,
+			ColSpan:       endModCol - startModCol + 1,
 		}
 
-		mm.merges = append(mm.merges, newMergeRange)
-
-		// Build ModIdx→Anchor map
-		for row := startRow; row <= endRow; row++ {
-			for col := startCol; col <= endCol; col++ {
-				mm.cellToMergeAnchor[CellID{Row: row, Col: col}] = anchor
+		// Build ModIdx→Anchor map\
+		/*
+			for row := startModRow; row <= endModRow; row++ {
+				for col := startModCol; col <= endModCol; col++ {
+					mm.cellToMergeAnchor[CellID{Row: row, Col: col}] = anchor
+				}
 			}
-		}
+		*/
 
 		startVisRow = -1
 		endVisRow = -1
@@ -101,7 +98,7 @@ func (mm *MergeManager) buildMergeLookup(mergeCells []MergeRange) {
 		endVisCol = -1
 
 		height := float32(0)
-		for i := newMergeRange.StartModelRow; i < newMergeRange.StartModelRow+newMergeRange.RowSpan; i++ {
+		for i := mergeModRange.StartModelRow; i < mergeModRange.StartModelRow+mergeModRange.RowSpan; i++ {
 			visIdx := cm.GetRowVisIdxFromModIdx(i)
 			if visIdx != -1 {
 				if startVisRow == -1 {
@@ -113,7 +110,7 @@ func (mm *MergeManager) buildMergeLookup(mergeCells []MergeRange) {
 		}
 
 		width := float32(0)
-		for i := newMergeRange.StartModelCol; i < newMergeRange.StartModelCol+newMergeRange.ColSpan; i++ {
+		for i := mergeModRange.StartModelCol; i < mergeModRange.StartModelCol+mergeModRange.ColSpan; i++ {
 			visIdx := cm.GetColVisIdxFromModIdx(i)
 			if visIdx != -1 {
 				if startVisCol == -1 {
@@ -128,10 +125,22 @@ func (mm *MergeManager) buildMergeLookup(mergeCells []MergeRange) {
 			continue //  completely hidden range
 		}
 
-		mm.visibleMergeSet[anchor] = true
-		mm.anchorToSize[anchor] = fyne.NewSize(width, height)
+		visibleAnchorModRow := cm.GetRowModIdxFromVisIdx(startVisRow)
+		visibleAnchorModCol := cm.GetColModIdxFromVisIdx(startVisCol)
+		visibleAnchor := CellID{Row: visibleAnchorModRow, Col: visibleAnchorModCol}
 
-		info := VisIdxMergeInfo{
+		for row := startModRow; row <= endModRow; row++ {
+			for col := startModCol; col <= endModCol; col++ {
+				mm.cellToMergeAnchor[CellID{Row: row, Col: col}] = visibleAnchor // Changed!
+			}
+		}
+
+		// merged range Size()
+		// key merged range anchor cell
+		mm.mergedeSizeByModAnchor[visibleAnchor] = fyne.NewSize(width, height)
+		//mm.mergedeSizeByModAnchor[anchor] = fyne.NewSize(width, height)
+
+		mergeVisInfo := VisIdxMergeInfo{
 			VisRowStart: startVisRow,
 			VisRowEnd:   endVisRow,
 			VisColStart: startVisCol,
@@ -140,7 +149,7 @@ func (mm *MergeManager) buildMergeLookup(mergeCells []MergeRange) {
 
 		for visRow := startVisRow; visRow <= endVisRow; visRow++ {
 			for visCol := startVisCol; visCol <= endVisCol; visCol++ {
-				mm.visIdxMergeCache[CellID{visRow, visCol}] = info
+				mm.visIdxMergeCache[CellID{visRow, visCol}] = mergeVisInfo
 			}
 		}
 
@@ -163,27 +172,34 @@ func (mm *MergeManager) IsCellMerged(cellModID CellID) (CellID, bool) {
 	return CellID{Row: 0, Col: 0}, false
 }
 
-func (mm *MergeManager) IsMergedRange(cellVisId CellID) bool {
-	if _, merged := mm.visIdxMergeCache[cellVisId]; merged {
-		return true
+func (mm *MergeManager) isMergeRangeTransparent(cellModId CellID) bool {
+	if _, exists := mm.anchorHasBackgroundCache[cellModId]; exists {
+		return false
 	}
-	return false
+	return true
+}
+
+func (mm *MergeManager) GetMergedRangeByVisId(cellVisId CellID) (VisIdxMergeInfo, bool) {
+	if _, exist := mm.visIdxMergeCache[cellVisId]; exist {
+		return mm.visIdxMergeCache[cellVisId], true
+	}
+	return VisIdxMergeInfo{}, false
 }
 
 func (mm *MergeManager) IsVisibleMergeAnchor(cellModID CellID) bool {
-	if mm.visibleMergeSet != nil && mm.visibleMergeSet[cellModID] {
-		return true
-	}
-	return false
-
+	_, exists := mm.mergedeSizeByModAnchor[cellModID]
+	return exists
 }
 
 func (mm *MergeManager) GetMergeSize(anchor CellID) (fyne.Size, bool) {
-	size, exists := mm.anchorToSize[anchor]
-	return size, exists
+	if size, exists := mm.mergedeSizeByModAnchor[anchor]; exists {
+		return size, true
+	} else {
+		return fyne.Size{Width: -1, Height: -1}, true
+	}
 }
 
-func (m *MergeRange) GetBounds() (startModRowIdx, startModColIdx, endModRowIdx, endModColIdx int, err error) {
+func (m *MergeRange) GetMergeModBounds() (startModRowIdx, startModColIdx, endModRowIdx, endModColIdx int, err error) {
 	parts := strings.Split(m.Range, ":")
 	if len(parts) != 2 {
 		return 0, 0, 0, 0, fmt.Errorf("invalid merge range: %s", m.Range)
@@ -202,12 +218,10 @@ func (m *MergeRange) GetBounds() (startModRowIdx, startModColIdx, endModRowIdx, 
 	return startModRowIdx - 1, startModColIdx - 1, endModRowIdx - 1, endModColIdx - 1, nil
 }
 
-func (m *MergeRange) GetAnchor() (CellID, error) {
-	startRow, startCol, _, _, err := m.GetBounds()
-	if err != nil {
-		return CellID{}, err
+func (mm *MergeManager) ForEachVisibleMerge(fn func(anchor CellID)) {
+	for anchor := range mm.mergedeSizeByModAnchor {
+		fn(anchor)
 	}
-	return CellID{Row: startRow, Col: startCol}, nil
 }
 
 func (mm *MergeManager) GetCellAnchor(cellID CellID) (anchor CellID, isMerged bool) {
@@ -221,12 +235,12 @@ func (mm *MergeManager) GetCellAnchor(cellID CellID) (anchor CellID, isMerged bo
 // Check if merge bounds overlap the viewport bounds
 func (mm *MergeManager) IsMergeInViewport(anchor CellID, viewport Viewport) bool {
 	// Get the merge range from anchor
-	mergeRange, exists := mm.anchorToRange[anchor]
+	mergeRange, exists := mm.anchorToModelRange[anchor]
 	if !exists {
 		return false
 	}
 
-	startRow, startCol, endRow, endCol, _ := mergeRange.GetBounds()
+	startRow, startCol, endRow, endCol, _ := mergeRange.GetMergeModBounds()
 
 	vpStartRow := mm.cm.GetRowModIdxFromVisIdx(viewport.FirstRowVisIdx)
 	vpEndRow := mm.cm.GetRowModIdxFromVisIdx(viewport.LastRowVisIdx)

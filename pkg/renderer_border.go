@@ -144,14 +144,14 @@ func (gl *BorderLineRenderer) setBorderlineVisibility(carcuss *BorderLineCarcuss
 
 func (gl *BorderLineRenderer) setMergeBorderlineVisibility(carcuss *BorderLineCarcuss, id CellID, anchor CellID) {
 	mm := gl.ctx.MergeManager
-	mergeRange, exists := mm.anchorToRange[anchor]
+	mergeRange, exists := mm.anchorToModelRange[anchor]
 	if !exists {
 		carcuss.BorderLineRight.Hide()
 		carcuss.BorderLineBottom.Hide()
 		return
 	}
 
-	_, _, endRow, endCol, _ := mergeRange.GetBounds()
+	_, _, endRow, endCol, _ := mergeRange.GetMergeModBounds()
 
 	// Show gridlines only on merge boundaries
 	if id.Col == endCol {

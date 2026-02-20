@@ -1,6 +1,7 @@
 package pkg
 
 import (
+	"fmt"
 	"sort"
 
 	"fyne.io/fyne/v2"
@@ -26,6 +27,11 @@ type ColLayout struct {
 	PixelStart float32
 	PixelEnd   float32
 }
+type SplitCell struct {
+	Cell string
+	Row  int
+	Col  int
+}
 
 type CoordinateManager struct {
 	visRowMap      []RowLayout
@@ -40,13 +46,18 @@ type CoordinateManager struct {
 	scrollOffset     fyne.Position
 	prevScrollOffset fyne.Position
 
-	freezeRowSplit int // Model row index for freeze split
-	freezeColSplit int // Model col index for freeze split
+	freezeModRowSplit int // Model row index from excelize (YSplit)
+	freezeModColSplit int // Model col index from excelize (XSplit)
 
-	freezeRowPixelEnd float32
-	freezeColPixelEnd float32
+	freezeVisRowSplit int // Model row index for freeze split
+	freezeVisColSplit int // Model col index for freeze split
+
+	freezeVisRowPixelEnd float32
+	freezeVisColPixelEnd float32
 
 	viewports []Viewport
+
+	splitCell SplitCell
 }
 
 func NewCoordinateManager() *CoordinateManager {
@@ -56,9 +67,36 @@ func NewCoordinateManager() *CoordinateManager {
 	}
 }
 
+func (cm *CoordinateManager) SetSplitCell(grid *WorkSheetData) {
+
+	if grid.FreezePanes.TopLeftCell == "" {
+		return
+	}
+	cm.splitCell.Cell = grid.FreezePanes.TopLeftCell
+
+	modColIdx, modRowIdx, err := CellRefToCoordinates(grid.FreezePanes.TopLeftCell)
+	if err != nil {
+		return
+	}
+	cm.splitCell.Row = modRowIdx
+	cm.splitCell.Col = modColIdx
+
+	cm.freezeModRowSplit = modRowIdx - 1
+	cm.freezeModColSplit = modColIdx - 1
+}
+
 func (cm *CoordinateManager) rebuildRowLayout(grid *WorkSheetData) {
 
-	cm.freezeRowSplit = grid.FreezePanes.YSplit
+	fmt.Println("TopLeftCell: ", grid.FreezePanes.TopLeftCell)
+	//cm.freezeModRowSplit = grid.FreezePanes.YSplit // Store model index
+
+	//endModColIdx, endModRowIdx, err := CellRefToCoordinates(grid.FreezePanes.TopLeftCell)
+	//if err != nil {
+	//	return
+	//}
+
+	//fmt.Println(endModColIdx, endModRowIdx)
+	//cm.freezeVisRowSplit = grid.FreezePanes.YSplit
 
 	cm.visRowMap = cm.visRowMap[:1]
 	cm.visRowMap[0] = RowLayout{ModIdx: -1, Height: 0, PixelStart: 0}
@@ -68,6 +106,7 @@ func (cm *CoordinateManager) rebuildRowLayout(grid *WorkSheetData) {
 	y := float32(0)
 	for modIdx := 0; modIdx < grid.RowsNof; modIdx++ {
 		if !grid.HiddenRows[modIdx] {
+			//rowVisCount++
 			height := grid.RowHeights[modIdx]
 			cm.visRowMap = append(cm.visRowMap, RowLayout{
 				ModIdx:     modIdx,
@@ -82,12 +121,35 @@ func (cm *CoordinateManager) rebuildRowLayout(grid *WorkSheetData) {
 		}
 	}
 	cm.totalVisHeight = y
-	cm.freezeRowPixelEnd = cm.visRowMap[cm.freezeRowSplit].PixelEnd
+
+	if cm.freezeModRowSplit == 0 {
+		cm.freezeVisRowSplit = 0
+		cm.freezeVisRowPixelEnd = 0
+	} else {
+		// Find last visible row in frozen range
+		cm.freezeVisRowSplit = 0
+		for i := cm.freezeModRowSplit - 1; i >= 0; i-- {
+			if cm.modToVisRowMap[i] != -1 {
+				cm.freezeVisRowSplit = cm.modToVisRowMap[i]
+				break
+			}
+		}
+
+		if cm.freezeVisRowSplit > 0 {
+			cm.freezeVisRowPixelEnd = cm.visRowMap[cm.freezeVisRowSplit].PixelEnd
+		} else {
+			cm.freezeVisRowPixelEnd = 0
+		}
+	}
+
+	//cm.freezeVisRowPixelEnd = cm.visRowMap[cm.freezeModRowSplit].PixelEnd
+	//cm.freezeVisRowSplit = cm.freezeModRowSplit
 }
 
 func (cm *CoordinateManager) rebuildColLayout(grid *WorkSheetData) {
 
-	cm.freezeColSplit = grid.FreezePanes.XSplit
+	cm.freezeModColSplit = grid.FreezePanes.XSplit
+	//cm.freezeVisColSplit = grid.FreezePanes.XSplit
 
 	cm.visColMap = cm.visColMap[:1]
 	cm.visColMap[0] = ColLayout{ModIdx: -1, Width: 0, PixelStart: 0}
@@ -110,7 +172,27 @@ func (cm *CoordinateManager) rebuildColLayout(grid *WorkSheetData) {
 		}
 	}
 	cm.totalVisWidth = x
-	cm.freezeColPixelEnd = cm.visColMap[cm.freezeColSplit].PixelEnd
+
+	if cm.freezeModColSplit == 0 {
+		cm.freezeVisColSplit = 0
+		cm.freezeVisColPixelEnd = 0
+	} else {
+		// Find last visible row in frozen range
+		cm.freezeVisColSplit = 0
+		for i := cm.freezeModColSplit - 1; i >= 0; i-- {
+			if cm.modToVisColMap[i] != -1 {
+				cm.freezeVisColSplit = cm.modToVisColMap[i]
+				break
+			}
+		}
+
+		if cm.freezeVisColSplit > 0 {
+			cm.freezeVisColPixelEnd = cm.visColMap[cm.freezeVisColSplit].PixelEnd
+		} else {
+			cm.freezeVisColPixelEnd = 0
+		}
+	}
+	//cm.freezeVisColPixelEnd = cm.visColMap[cm.freezeVisColSplit].PixelEnd
 }
 func (cm *CoordinateManager) GetColPixelPosEndX(region GridRegion, colModIdx int) float32 {
 	colVisIdx := cm.modToVisColMap[colModIdx]
@@ -118,9 +200,9 @@ func (cm *CoordinateManager) GetColPixelPosEndX(region GridRegion, colModIdx int
 
 	switch region {
 	case RegionMain:
-		x -= cm.freezeColPixelEnd
+		x -= cm.freezeVisColPixelEnd
 	case RegionFrozenRows:
-		x -= cm.freezeColPixelEnd + cm.scrollOffset.X
+		x -= cm.freezeVisColPixelEnd + cm.scrollOffset.X
 	case RegionFixedCorner, RegionFrozenCols:
 		// no adjustment
 	}
@@ -132,9 +214,9 @@ func (cm *CoordinateManager) GetColPixelPosX(region GridRegion, colModIdx int) f
 
 	switch region {
 	case RegionMain:
-		x -= cm.freezeColPixelEnd
+		x -= cm.freezeVisColPixelEnd
 	case RegionFrozenRows:
-		x -= cm.freezeColPixelEnd + cm.scrollOffset.X
+		x -= cm.freezeVisColPixelEnd + cm.scrollOffset.X
 	case RegionFixedCorner, RegionFrozenCols:
 		// no adjustment
 	}
@@ -147,9 +229,9 @@ func (cm *CoordinateManager) GetRowPixelPosEndY(region GridRegion, rowModIdx int
 
 	switch region {
 	case RegionMain:
-		y -= cm.freezeRowPixelEnd
+		y -= cm.freezeVisRowPixelEnd
 	case RegionFrozenCols:
-		y -= cm.freezeRowPixelEnd + cm.scrollOffset.Y
+		y -= cm.freezeVisRowPixelEnd + cm.scrollOffset.Y
 	case RegionFixedCorner, RegionFrozenRows:
 		// no adjustment
 	}
@@ -161,9 +243,9 @@ func (cm *CoordinateManager) GetRowPixelPosY(region GridRegion, rowModIdx int) f
 
 	switch region {
 	case RegionMain:
-		y -= cm.freezeRowPixelEnd
+		y -= cm.freezeVisRowPixelEnd
 	case RegionFrozenCols:
-		y -= cm.freezeRowPixelEnd + cm.scrollOffset.Y
+		y -= cm.freezeVisRowPixelEnd + cm.scrollOffset.Y
 	case RegionFixedCorner, RegionFrozenRows:
 		// no adjustment
 	}
@@ -179,12 +261,12 @@ func (cm *CoordinateManager) GetPixelPos(region GridRegion, rowModIdx, colModIdx
 
 	switch region {
 	case RegionMain:
-		x -= cm.freezeColPixelEnd
-		y -= cm.freezeRowPixelEnd
+		x -= cm.freezeVisColPixelEnd
+		y -= cm.freezeVisRowPixelEnd
 	case RegionFrozenRows:
-		x -= cm.freezeColPixelEnd + cm.scrollOffset.X
+		x -= cm.freezeVisColPixelEnd + cm.scrollOffset.X
 	case RegionFrozenCols:
-		y -= cm.freezeRowPixelEnd + cm.scrollOffset.Y
+		y -= cm.freezeVisRowPixelEnd + cm.scrollOffset.Y
 	case RegionFixedCorner:
 		// no adjustment
 	}
@@ -208,8 +290,8 @@ func (cm *CoordinateManager) GetColPixelStartByVisIdx(visIdx int) float32 {
 }
 
 func (cm *CoordinateManager) GetFreezeOffsets() (colOffset, rowOffset float32) {
-	colOffset = cm.freezeColPixelEnd
-	rowOffset = cm.freezeRowPixelEnd
+	colOffset = cm.freezeVisColPixelEnd
+	rowOffset = cm.freezeVisRowPixelEnd
 	return
 }
 
@@ -244,33 +326,64 @@ func (cm *CoordinateManager) CalculateViewports(scrollSize fyne.Size) [4]Viewpor
 	var viewports [4]Viewport
 
 	viewports[RegionFixedCorner] = Viewport{
-		FirstRowVisIdx: 1,
-		LastRowVisIdx:  cm.freezeRowSplit,
-		FirstColVisIdx: 1,
-		LastColVisIdx:  cm.freezeColSplit,
+		//FirstRowVisIdx: 1,
+		FirstRowVisIdx: min(1, cm.freezeVisRowSplit),
+		//LastRowVisIdx:  cm.freezeRowSplit,
+		LastRowVisIdx: cm.freezeVisRowSplit,
+		//FirstColVisIdx: 1,
+		FirstColVisIdx: min(1, cm.freezeVisColSplit),
+		LastColVisIdx:  cm.freezeVisColSplit,
 	}
 
+	/*
+		fmt.Printf("[VP-CURRENT-FIXED] FirstRow:%d, LastRow:%d, FirstCol:%d, LastCol:%d\n",
+			viewports[RegionFixedCorner].FirstRowVisIdx,
+			viewports[RegionFixedCorner].LastRowVisIdx,
+			viewports[RegionFixedCorner].FirstColVisIdx,
+			viewports[RegionFixedCorner].LastColVisIdx)
+	*/
 	viewports[RegionFrozenRows] = Viewport{
-		FirstRowVisIdx: 1,
-		LastRowVisIdx:  cm.freezeRowSplit,
+		//FirstRowVisIdx: 1,
+		FirstRowVisIdx: min(1, cm.freezeVisRowSplit),
+		//LastRowVisIdx:  cm.freezeRowSplit,
+		LastRowVisIdx:  cm.freezeVisRowSplit,
 		FirstColVisIdx: mainFirstCol,
 		LastColVisIdx:  mainLastCol,
 	}
-
+	/*
+		fmt.Printf("[VP-CURRENT-RegionFrozenRows] FirstRow:%d, LastRow:%d, FirstCol:%d, LastCol:%d\n",
+			viewports[RegionFrozenRows].FirstRowVisIdx,
+			viewports[RegionFrozenRows].LastRowVisIdx,
+			viewports[RegionFrozenRows].FirstColVisIdx,
+			viewports[RegionFrozenRows].LastColVisIdx)
+	*/
 	viewports[RegionFrozenCols] = Viewport{
 		FirstRowVisIdx: mainFirstRow,
 		LastRowVisIdx:  mainLastRow,
-		FirstColVisIdx: 1,
-		LastColVisIdx:  cm.freezeColSplit,
+		//FirstColVisIdx: 1,
+		FirstColVisIdx: min(1, cm.freezeVisColSplit),
+		LastColVisIdx:  cm.freezeVisColSplit,
 	}
-
+	/*
+		fmt.Printf("[VP-CURRENT-RegionFrozenCols] FirstRow:%d, LastRow:%d, FirstCol:%d, LastCol:%d\n",
+			viewports[RegionFrozenCols].FirstRowVisIdx,
+			viewports[RegionFrozenCols].LastRowVisIdx,
+			viewports[RegionFrozenCols].FirstColVisIdx,
+			viewports[RegionFrozenCols].LastColVisIdx)
+	*/
 	viewports[RegionMain] = Viewport{
 		FirstRowVisIdx: mainFirstRow,
 		LastRowVisIdx:  mainLastRow,
 		FirstColVisIdx: mainFirstCol,
 		LastColVisIdx:  mainLastCol,
 	}
-
+	/*
+		fmt.Printf("[VP-CURRENT-RegionMain] FirstRow:%d, LastRow:%d, FirstCol:%d, LastCol:%d\n",
+			viewports[RegionMain].FirstRowVisIdx,
+			viewports[RegionMain].LastRowVisIdx,
+			viewports[RegionMain].FirstColVisIdx,
+			viewports[RegionMain].LastColVisIdx)
+	*/
 	cm.viewports = viewports[:]
 
 	return viewports
@@ -281,7 +394,7 @@ func (cm *CoordinateManager) GetViewportForRegion(region GridRegion) Viewport {
 
 func (cm *CoordinateManager) findFirstVisRowIdx() int {
 	adjustedY := cm.scrollOffset.Y
-	adjustedY += cm.freezeRowPixelEnd
+	adjustedY += cm.freezeVisRowPixelEnd
 
 	idx := sort.Search(len(cm.visRowMap), func(i int) bool {
 		return cm.visRowMap[i].PixelEnd > adjustedY
@@ -293,7 +406,7 @@ func (cm *CoordinateManager) findFirstVisRowIdx() int {
 
 func (cm *CoordinateManager) findLastVisRowIdx(height float32) int {
 	adjustedY := cm.scrollOffset.Y + height
-	adjustedY += cm.freezeRowPixelEnd
+	adjustedY += cm.freezeVisRowPixelEnd
 
 	idx := sort.Search(len(cm.visRowMap), func(i int) bool {
 		return cm.visRowMap[i].PixelEnd >= adjustedY
@@ -308,7 +421,7 @@ func (cm *CoordinateManager) findLastVisRowIdx(height float32) int {
 
 func (cm *CoordinateManager) findFirstVisColIdx() int {
 	adjustedX := cm.scrollOffset.X
-	adjustedX += cm.freezeColPixelEnd
+	adjustedX += cm.freezeVisColPixelEnd
 
 	idx := sort.Search(len(cm.visColMap), func(i int) bool {
 		return cm.visColMap[i].PixelEnd > adjustedX
@@ -319,7 +432,7 @@ func (cm *CoordinateManager) findFirstVisColIdx() int {
 
 func (cm *CoordinateManager) findLastVisColIdx(width float32) int {
 	adjustedX := cm.scrollOffset.X + width
-	adjustedX += cm.freezeColPixelEnd
+	adjustedX += cm.freezeVisColPixelEnd
 
 	idx := sort.Search(len(cm.visColMap), func(i int) bool {
 		return cm.visColMap[i].PixelEnd >= adjustedX
@@ -379,18 +492,18 @@ func (cm *CoordinateManager) GetWidthByModIdx(colModIdx int) float32 {
 }
 
 func (cm *CoordinateManager) GetFrozenRows() int {
-	return cm.freezeRowSplit
+	return cm.freezeVisRowSplit
 }
 func (cm *CoordinateManager) HasFrozenRows() bool {
-	return cm.freezeColSplit > 0
+	return cm.freezeVisRowSplit > 0
 }
 
 func (cm *CoordinateManager) GetFrozenColumns() int {
-	return cm.freezeColSplit
+	return cm.freezeVisColSplit
 }
 
 func (cm *CoordinateManager) HasFrozenColumns() bool {
-	return cm.freezeColSplit > 0
+	return cm.freezeVisColSplit > 0
 }
 
 func (cm *CoordinateManager) FindFirstVisibleColInRange(startModIdx, endModIdx int) int {
@@ -434,12 +547,12 @@ func (cm *CoordinateManager) FindCellAtPosition(pos fyne.Position, region GridRe
 
 	switch region {
 	case RegionMain:
-		adjustedPos.X += cm.scrollOffset.X + cm.freezeColPixelEnd
-		adjustedPos.Y += cm.scrollOffset.Y + cm.freezeRowPixelEnd
+		adjustedPos.X += cm.scrollOffset.X + cm.freezeVisColPixelEnd
+		adjustedPos.Y += cm.scrollOffset.Y + cm.freezeVisRowPixelEnd
 	case RegionFrozenRows:
-		adjustedPos.X += cm.scrollOffset.X + cm.freezeColPixelEnd
+		adjustedPos.X += cm.scrollOffset.X + cm.freezeVisColPixelEnd
 	case RegionFrozenCols:
-		adjustedPos.Y += cm.scrollOffset.Y + cm.freezeRowPixelEnd
+		adjustedPos.Y += cm.scrollOffset.Y + cm.freezeVisRowPixelEnd
 	case RegionFixedCorner:
 		// No adjustment needed
 	}
