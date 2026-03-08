@@ -1,7 +1,6 @@
 package pkg
 
 import (
-	"fmt"
 	"image/color"
 
 	"fyne.io/fyne/v2"
@@ -174,30 +173,11 @@ func (pf *PrimitiveFlagger) Reset() {
 	pf.items = pf.items[:0] // Keep capacity for next cycle
 }
 
-func (pcr *PrimitiveRenderer) removeMergesOutsideViewport(viewport Viewport, gridRegion GridRegion) {
-	mm := pcr.ctx.MergeManager
-
-	mm.ForEachVisibleMerge(func(anchorCellModId CellID) {
-		isVisible := mm.IsMergeInViewport(anchorCellModId, viewport)
-
-		if !isVisible {
-			// Merge left viewport - flag for recycling
-			if _, exists := pcr.rectanglePrimitivesIndex[gridRegion][anchorCellModId]; exists {
-				pcr.flagRectanglePrimitives[gridRegion].Put(anchorCellModId)
-			}
-
-			if _, exists := pcr.textPrimitivesIndex[gridRegion][anchorCellModId]; exists {
-				pcr.flagTextPrimitives[gridRegion].Put(anchorCellModId)
-			}
-		}
-	})
-}
-
 func (pcr *PrimitiveRenderer) removeCell(cellModId CellID, gridRegion GridRegion) {
 
 	mm := pcr.ctx.MergeManager
 
-	if _, merged := mm.IsCellMerged(cellModId); merged {
+	if mm.isCellInMergedRange(cellModId) {
 		return
 	}
 
@@ -211,42 +191,54 @@ func (pcr *PrimitiveRenderer) removeCell(cellModId CellID, gridRegion GridRegion
 	}
 }
 
-func (pcr *PrimitiveRenderer) renderVisibleMerges(backgroundContainer, dataContainer *fyne.Container, viewport Viewport, gridRegion GridRegion) {
+func (pcr *PrimitiveRenderer) updateVisibleMerges(containers RegionContainers, viewport Viewport, region GridRegion) {
 	mm := pcr.ctx.MergeManager
 
-	mm.ForEachVisibleMerge(func(anchorCellModId CellID) {
+	mm.ForEachVisibleMerge(func(merge *VisibleMerge) {
+		modelAnchor := mm.modelAnchors[merge.MergeIdx]
+		if merge.VisRowStart > viewport.LastRowVisIdx ||
+			merge.VisRowEnd < viewport.FirstRowVisIdx ||
+			merge.VisColStart > viewport.LastColVisIdx ||
+			merge.VisColEnd < viewport.FirstColVisIdx {
 
-		if anchorCellModId.Row == 6 && anchorCellModId.Col == 21 {
-			fmt.Println("here")
-		}
-		isVisible := mm.IsMergeInViewport(anchorCellModId, viewport)
+			// Merge left viewport - flag for removal
+			if _, exists := pcr.rectanglePrimitivesIndex[region][modelAnchor]; exists {
+				pcr.flagRectanglePrimitives[region].Put(modelAnchor)
+			}
+			if _, exists := pcr.textPrimitivesIndex[region][modelAnchor]; exists {
+				pcr.flagTextPrimitives[region].Put(modelAnchor)
+			}
+		} else {
 
-		_, rectExists := pcr.rectanglePrimitivesIndex[gridRegion][anchorCellModId]
-		_, textExists := pcr.textPrimitivesIndex[gridRegion][anchorCellModId]
+			anchorCellModId := merge.VisAnchor
+			anchorCellModId = modelAnchor
+			_, rectExists := pcr.rectanglePrimitivesIndex[region][anchorCellModId]
+			_, textExists := pcr.textPrimitivesIndex[region][anchorCellModId]
 
-		if isVisible {
-			cellData := pcr.ctx.Data.GridData[anchorCellModId]
+			cellData := pcr.ctx.Data.GridData[modelAnchor]
 
 			needRect := cellData != nil && cellData.Style != nil &&
 				cellData.Style.Fill.BgColor != color.Transparent && !rectExists
 
 			needText := cellData != nil && cellData.Value != "" && !textExists
-			if anchorCellModId.Row == 3 {
-				fmt.Println("Hello")
-			}
-			pcr.addPrimitivesToCell(backgroundContainer, dataContainer,
-				anchorCellModId,
-				gridRegion, true, needRect, needText, cellData)
 
+			size := merge.PixelSize
+
+			pcr.addPrimitivesToCell(containers,
+				anchorCellModId,
+				region, needRect, needText, size, cellData)
 		}
 	})
 }
 
-func (pcr *PrimitiveRenderer) addPrimitivesToCell(backgroundContainer, dataContainer *fyne.Container, id CellID, gridRegion GridRegion, isAnchorCell bool, isRectRequired bool, isTextRequired bool, cellData *CellData) {
+func (pcr *PrimitiveRenderer) addPrimitivesToCell(containers RegionContainers, id CellID, gridRegion GridRegion,
+	isRectRequired bool,
+	isTextRequired bool,
+	size fyne.Size,
+	cellData *CellData) {
 
 	cm := pcr.ctx.CoordManager
 
-	mm := pcr.ctx.MergeManager
 	var recycledItem bool
 	if isRectRequired {
 		var rectanglePrimiticeItem *canvas.Rectangle
@@ -266,17 +258,11 @@ func (pcr *PrimitiveRenderer) addPrimitivesToCell(backgroundContainer, dataConta
 				pcr.rectanglePrimitivesIndex[gridRegion][id] = primitiveRectangleRecyleItem.id
 			} else {
 				pcr.rectanglePrimitives[gridRegion] = append(pcr.rectanglePrimitives[gridRegion], primitiveRectangleRecyleItem.obj)
-				backgroundContainer.Add(primitiveRectangleRecyleItem.obj)
+				containers.Background.Add(primitiveRectangleRecyleItem.obj)
 				pcr.rectanglePrimitivesIndex[gridRegion][id] = len(pcr.rectanglePrimitives[gridRegion]) - 1
 			}
 		}
 
-		var size fyne.Size
-		if isAnchorCell {
-			size, _ = mm.GetMergeSize(id)
-		} else {
-			size = cm.GetCellSizeByModIdx(id.Row, id.Col)
-		}
 		primitiveRectangleRecyleItem.obj.FillColor = cellData.Style.Fill.BgColor
 		primitiveRectangleRecyleItem.obj.Resize(size)
 		if gridRegion == RegionMain {
@@ -302,7 +288,7 @@ func (pcr *PrimitiveRenderer) addPrimitivesToCell(backgroundContainer, dataConta
 				pcr.textPrimitivesIndex[gridRegion][id] = primitiveTextRecyleItem.id
 			} else {
 				pcr.textPrimitives[gridRegion] = append(pcr.textPrimitives[gridRegion], primitiveTextRecyleItem.obj)
-				dataContainer.Add(primitiveTextRecyleItem.obj)
+				containers.Data.Add(primitiveTextRecyleItem.obj)
 				pcr.textPrimitivesIndex[gridRegion][id] = len(pcr.textPrimitives[gridRegion]) - 1
 			}
 		}
@@ -313,18 +299,20 @@ func (pcr *PrimitiveRenderer) addPrimitivesToCell(backgroundContainer, dataConta
 	}
 }
 
-func (pcr *PrimitiveRenderer) addCell(backgroundContainer *fyne.Container, dataContainer *fyne.Container, rowModIdx, colModIdx int, gridRegion GridRegion) {
-	id := CellID{Row: rowModIdx, Col: colModIdx}
+func (pcr *PrimitiveRenderer) renderCell(containers RegionContainers, rowModIdx, colModIdx int, gridRegion GridRegion) {
+	mm := pcr.ctx.MergeManager
 
-	_, rectExists := pcr.rectanglePrimitivesIndex[gridRegion][id]
+	modCellId := CellID{Row: rowModIdx, Col: colModIdx}
 
-	_, textExists := pcr.textPrimitivesIndex[gridRegion][id]
+	_, rectExists := pcr.rectanglePrimitivesIndex[gridRegion][modCellId]
+
+	_, textExists := pcr.textPrimitivesIndex[gridRegion][modCellId]
 
 	if rectExists && textExists {
 		return
 	}
 
-	cellData := pcr.ctx.Data.GridData[id]
+	cellData := pcr.ctx.Data.GridData[modCellId]
 
 	needRect := cellData != nil && cellData.Style != nil &&
 		cellData.Style.Fill.BgColor != color.Transparent && !rectExists
@@ -335,27 +323,15 @@ func (pcr *PrimitiveRenderer) addCell(backgroundContainer *fyne.Container, dataC
 		return
 	}
 
-	mm := pcr.ctx.MergeManager
-
-	if rowModIdx == 6 && colModIdx == 21 {
-		fmt.Println("here")
-	}
-
-	//if _, isMerged := mm.IsCellMerged(id); isMerged {
-	//part of merged range; but on the anchor cell
-	//	return
-	//}
-	// Skip ANYTHING merge-related (children OR anchors)
-	if _, exists := mm.IsCellMerged(id); exists {
+	if mm.isCellInMergedRange(modCellId) {
 		return
 	}
 
-	isMergeAnchor := mm.IsVisibleMergeAnchor(id)
+	size := pcr.ctx.CoordManager.GetCellSizeByModIdx(rowModIdx, colModIdx)
 
-	pcr.addPrimitivesToCell(backgroundContainer, dataContainer,
-		id,
-		gridRegion, isMergeAnchor, needRect, needText, cellData)
-
+	pcr.addPrimitivesToCell(containers,
+		modCellId,
+		gridRegion, needRect, needText, size, cellData)
 }
 
 func (pcr *PrimitiveRenderer) moveToCorner(gridRegion GridRegion) {
@@ -423,92 +399,4 @@ func (pcr *PrimitiveRenderer) setTextValue(text *canvas.Text, val string, font *
 			text.FontSource = fontMgr.Regular
 		}
 	}
-}
-
-func (pr *PrimitiveRenderer) BackgroundTransparencyStates(region GridRegion) TransparencyCache {
-
-	isTransparent := make(map[CellID]bool)
-	vpCurrent := pr.ctx.Viewports[region]
-	vpPrevious := pr.ctx.LastViewports[region]
-
-	cm := pr.ctx.CoordManager
-
-	for rowVisIdx := vpCurrent.FirstRowVisIdx; rowVisIdx <= vpPrevious.FirstRowVisIdx; rowVisIdx++ {
-		for colVisIdx := vpCurrent.FirstColVisIdx; colVisIdx <= vpCurrent.LastColVisIdx; colVisIdx++ {
-
-			rowModIdx := cm.GetRowModIdxFromVisIdx(rowVisIdx)
-			colModIdx := cm.GetColModIdxFromVisIdx(colVisIdx)
-			cellID := CellID{Row: rowModIdx, Col: colModIdx}
-
-			_, hasBackground := pr.rectanglePrimitivesIndex[region][cellID]
-
-			isTransparent[CellID{rowVisIdx, colVisIdx}] = !hasBackground
-		}
-	}
-
-	/*
-		if vpCurrent.LastRowVisIdx > vpPrevious.LastRowVisIdx {
-			// Include 1 row from previous viewport as buffer, BUT check boundary
-			startRow := vpPrevious.LastRowVisIdx
-			if vpPrevious.LastRowVisIdx < vpCurrent.FirstRowVisIdx {
-				startRow = vpCurrent.FirstRowVisIdx // Don't go before current viewport
-			}
-			endRow := vpCurrent.LastRowVisIdx
-
-			for rowVisIdx := startRow; rowVisIdx <= endRow; rowVisIdx++ {
-				for colVisIdx := vpCurrent.FirstColVisIdx; colVisIdx <= vpCurrent.LastColVisIdx; colVisIdx++ {
-					rowModIdx := cm.GetRowModIdxFromVisIdx(rowVisIdx)
-					colModIdx := cm.GetColModIdxFromVisIdx(colVisIdx)
-					cellID := CellID{Row: rowModIdx, Col: colModIdx}
-
-					_, hasBackground := pr.rectanglePrimitivesIndex[region][cellID]
-
-					isTransparent[CellID{rowVisIdx, colVisIdx}] = !hasBackground
-				}
-			}
-		}
-	*/
-
-	for rowVisIdx := vpPrevious.LastRowVisIdx; rowVisIdx <= vpCurrent.LastRowVisIdx; rowVisIdx++ {
-		for colVisIdx := vpCurrent.FirstColVisIdx; colVisIdx <= vpCurrent.LastColVisIdx; colVisIdx++ {
-
-			rowModIdx := cm.GetRowModIdxFromVisIdx(rowVisIdx)
-			colModIdx := cm.GetColModIdxFromVisIdx(colVisIdx)
-			cellID := CellID{Row: rowModIdx, Col: colModIdx}
-
-			_, hasBackground := pr.rectanglePrimitivesIndex[region][cellID]
-
-			isTransparent[CellID{rowVisIdx, colVisIdx}] = !hasBackground
-		}
-	}
-
-	remainingRowStart := max(vpPrevious.FirstRowVisIdx, vpCurrent.FirstRowVisIdx)
-	remainingRowEnd := min(vpPrevious.LastRowVisIdx, vpCurrent.LastRowVisIdx)
-
-	for colVisIdx := vpCurrent.FirstColVisIdx; colVisIdx < vpPrevious.FirstColVisIdx; colVisIdx++ {
-		for rowVisIdx := remainingRowStart; rowVisIdx <= remainingRowEnd; rowVisIdx++ {
-
-			rowModIdx := cm.GetRowModIdxFromVisIdx(rowVisIdx)
-			colModIdx := cm.GetColModIdxFromVisIdx(colVisIdx)
-			cellID := CellID{Row: rowModIdx, Col: colModIdx}
-
-			_, hasBackground := pr.rectanglePrimitivesIndex[region][cellID]
-
-			isTransparent[CellID{rowVisIdx, colVisIdx}] = !hasBackground
-		}
-	}
-
-	for colVisIdx := vpPrevious.LastColVisIdx + 1; colVisIdx <= vpCurrent.LastColVisIdx; colVisIdx++ {
-		for rowVisIdx := remainingRowStart; rowVisIdx <= remainingRowEnd; rowVisIdx++ {
-
-			rowModIdx := cm.GetRowModIdxFromVisIdx(rowVisIdx)
-			colModIdx := cm.GetColModIdxFromVisIdx(colVisIdx)
-			cellID := CellID{Row: rowModIdx, Col: colModIdx}
-
-			_, hasBackground := pr.rectanglePrimitivesIndex[region][cellID]
-
-			isTransparent[CellID{rowVisIdx, colVisIdx}] = !hasBackground
-		}
-	}
-	return isTransparent
 }

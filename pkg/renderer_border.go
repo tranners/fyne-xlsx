@@ -125,7 +125,7 @@ func (gl *BorderLineRenderer) addBorderLine(content *fyne.Container, cellMap map
 	} else {
 		carcuss.Container.Show()
 	}
-	//content.Add(carcuss.Container)
+
 	cellMap[id] = carcuss
 	return carcuss
 }

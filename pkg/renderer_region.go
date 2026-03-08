@@ -9,17 +9,19 @@ type RegionRenderer struct {
 	fontManager       *FontManager
 	primitiveRenderer *PrimitiveRenderer
 	borderRenderer    *BorderLineRenderer
-	gridlineRenderer  *PrimitiveGridLineRenderer
+	gridlineRenderer  *GridLineRenderer
 	frameCounters     map[GridRegion]int
 }
 
 func NewRegionRenderer(ctx *RenderContext, fontMgr *FontManager) *RegionRenderer {
+	primitiveRenderer := NewPrimitiveRenderer(ctx, fontMgr)
+	ctx.PrimitiveRenderer = primitiveRenderer
 	return &RegionRenderer{
 		ctx:               ctx,
 		fontManager:       fontMgr,
 		borderRenderer:    NewBorderLineRenderer(ctx),
-		primitiveRenderer: NewPrimitiveRenderer(ctx, fontMgr),
-		gridlineRenderer:  NewPrimitiveGridLineRenderer(ctx),
+		primitiveRenderer: primitiveRenderer,
+		gridlineRenderer:  NewGridLineRenderer(ctx),
 		frameCounters:     make(map[GridRegion]int),
 	}
 }
@@ -33,7 +35,6 @@ func (r *GridRenderer) renderRegion(
 
 	ctx := r.context
 	rr := r.regionRenderer
-	pr := rr.primitiveRenderer
 
 	if !ctx.PaneHasRenderedOnce[region] {
 		// This region hasn't had initial render yet
@@ -41,12 +42,7 @@ func (r *GridRenderer) renderRegion(
 			// Viewport is ready → Do FULL render
 			rr.renderCellsRegionFull(containers, region)
 
-			// FULL Horizontal
-
-			transparencyStates := pr.BackgroundTransparencyStates(region)
-
-			rr.renderGridlinesRegionFull(containers, region, Horizontal,
-				r.regionRenderer.gridlineRenderer.isGridLineRequiredH, transparencyStates)
+			rr.renderGridlinesRegionFull(containers, region, Horizontal)
 
 			ctx.PaneHasRenderedOnce[region] = true
 		}
@@ -69,50 +65,16 @@ func (r *GridRenderer) renderRegion(
 		if shouldRender {
 			rr.renderCellsRegionDelta(containers, region)
 
-			transparencyStates := pr.BackgroundTransparencyStates(region)
-
-			rr.renderGridlinesRegionDelta(containers, region, Horizontal, transparencyStates)
+			rr.renderGridlinesRegionDelta(containers, region, Horizontal)
 		}
 	}
 }
 
-func (rr *RegionRenderer) renderCellsRegionDelta(regionContainers RegionContainers, region GridRegion) {
-
+func (rr *RegionRenderer) removeStandardCellsOutsideViewport(vpCurrent, vpPrevious Viewport, region GridRegion) {
 	var remainingRowStart, remainingRowEnd int
-	vpCurrent := rr.ctx.Viewports[region]
-	vpPrevious := rr.ctx.LastViewports[region]
-	if 1 == 0 {
-		if region == RegionMain {
-			fmt.Printf("[VP-CURRENT-MAIN] FirstRow:%d, LastRow:%d, FirstCol:%d, LastCol:%d\n",
-				vpCurrent.FirstRowVisIdx, vpCurrent.LastRowVisIdx, vpCurrent.FirstColVisIdx, vpCurrent.LastColVisIdx)
-			fmt.Printf("[VP-PREVIOUS-MAIN] FirstRow:%d, LastRow:%d, FirstCol:%d, LastCol:%d\n",
-				vpPrevious.FirstRowVisIdx, vpPrevious.LastRowVisIdx, vpPrevious.FirstColVisIdx, vpPrevious.LastColVisIdx)
-		}
-		if region == RegionFixedCorner {
-
-			fmt.Printf("[VP-CURRENT-FIXED-CORNER] FirstRow:%d, LastRow:%d, FirstCol:%d, LastCol:%d\n",
-				vpCurrent.FirstRowVisIdx, vpCurrent.LastRowVisIdx, vpCurrent.FirstColVisIdx, vpCurrent.LastColVisIdx)
-			fmt.Printf("[VP-PREVIOUS-FIXED-CORNER] FirstRow:%d, LastRow:%d, FirstCol:%d, LastCol:%d\n",
-				vpPrevious.FirstRowVisIdx, vpPrevious.LastRowVisIdx, vpPrevious.FirstColVisIdx, vpPrevious.LastColVisIdx)
-		}
-		if region == RegionFrozenCols {
-			fmt.Printf("[VP-CURRENT-FIXED-COLS] FirstRow:%d, LastRow:%d, FirstCol:%d, LastCol:%d\n",
-				vpCurrent.FirstRowVisIdx, vpCurrent.LastRowVisIdx, vpCurrent.FirstColVisIdx, vpCurrent.LastColVisIdx)
-			fmt.Printf("[VP-PREVIOUS-FIXED-COLS] FirstRow:%d, LastRow:%d, FirstCol:%d, LastCol:%d\n",
-				vpPrevious.FirstRowVisIdx, vpPrevious.LastRowVisIdx, vpPrevious.FirstColVisIdx, vpPrevious.LastColVisIdx)
-		}
-		if region == RegionFrozenRows {
-
-			fmt.Printf("[VP-CURRENT-FIXED-ROWS] FirstRow:%d, LastRow:%d, FirstCol:%d, LastCol:%d\n",
-				vpCurrent.FirstRowVisIdx, vpCurrent.LastRowVisIdx, vpCurrent.FirstColVisIdx, vpCurrent.LastColVisIdx)
-			fmt.Printf("[VP-PREVIOUS-FIXED-ROWS] FirstRow:%d, LastRow:%d, FirstCol:%d, LastCol:%d\n",
-				vpPrevious.FirstRowVisIdx, vpPrevious.LastRowVisIdx, vpPrevious.FirstColVisIdx, vpPrevious.LastColVisIdx)
-		}
-	}
-	pr := rr.primitiveRenderer
 	cm := rr.ctx.CoordManager
+	pr := rr.primitiveRenderer
 
-	//if region == RegionMain {
 	for rowVisIdx := vpPrevious.FirstRowVisIdx; rowVisIdx < vpCurrent.FirstRowVisIdx; rowVisIdx++ {
 		rowModIdx := cm.GetRowModIdxFromVisIdx(rowVisIdx)
 		for colVisIdx := vpPrevious.FirstColVisIdx; colVisIdx <= vpPrevious.LastColVisIdx; colVisIdx++ {
@@ -147,13 +109,17 @@ func (rr *RegionRenderer) renderCellsRegionDelta(regionContainers RegionContaine
 		}
 	}
 
-	pr.removeMergesOutsideViewport(vpCurrent, region)
+}
 
+func (rr *RegionRenderer) addStandardCellsInViewport(regionContainers RegionContainers, vpCurrent, vpPrevious Viewport, region GridRegion) {
+	var remainingRowStart, remainingRowEnd int
+	cm := rr.ctx.CoordManager
+	pr := rr.primitiveRenderer
 	for rowVisIdx := vpCurrent.FirstRowVisIdx; rowVisIdx < vpPrevious.FirstRowVisIdx; rowVisIdx++ {
 		rowModIdx := cm.GetRowModIdxFromVisIdx(rowVisIdx)
 		for colVisIdx := vpCurrent.FirstColVisIdx; colVisIdx <= vpCurrent.LastColVisIdx; colVisIdx++ {
 			colModIdx := cm.GetColModIdxFromVisIdx(colVisIdx)
-			pr.addCell(regionContainers.Background, regionContainers.Data, rowModIdx, colModIdx, region)
+			pr.renderCell(regionContainers, rowModIdx, colModIdx, region)
 		}
 	}
 
@@ -161,7 +127,7 @@ func (rr *RegionRenderer) renderCellsRegionDelta(regionContainers RegionContaine
 		rowModIdx := cm.GetRowModIdxFromVisIdx(rowVisIdx)
 		for colVisIdx := vpCurrent.FirstColVisIdx; colVisIdx <= vpCurrent.LastColVisIdx; colVisIdx++ {
 			colModIdx := cm.GetColModIdxFromVisIdx(colVisIdx)
-			pr.addCell(regionContainers.Background, regionContainers.Data, rowModIdx, colModIdx, region)
+			pr.renderCell(regionContainers, rowModIdx, colModIdx, region)
 		}
 	}
 
@@ -172,7 +138,7 @@ func (rr *RegionRenderer) renderCellsRegionDelta(regionContainers RegionContaine
 		colModIdx := cm.GetColModIdxFromVisIdx(colVisIdx)
 		for rowVisIdx := remainingRowStart; rowVisIdx <= remainingRowEnd; rowVisIdx++ {
 			rowModIdx := cm.GetRowModIdxFromVisIdx(rowVisIdx)
-			pr.addCell(regionContainers.Background, regionContainers.Data, rowModIdx, colModIdx, region)
+			pr.renderCell(regionContainers, rowModIdx, colModIdx, region)
 		}
 	}
 
@@ -180,26 +146,33 @@ func (rr *RegionRenderer) renderCellsRegionDelta(regionContainers RegionContaine
 		colModIdx := cm.GetColModIdxFromVisIdx(colVisIdx)
 		for rowVisIdx := remainingRowStart; rowVisIdx <= remainingRowEnd; rowVisIdx++ {
 			rowModIdx := cm.GetRowModIdxFromVisIdx(rowVisIdx)
-			pr.addCell(regionContainers.Background, regionContainers.Data, rowModIdx, colModIdx, region)
+			pr.renderCell(regionContainers, rowModIdx, colModIdx, region)
 		}
 	}
 
-	pr.renderVisibleMerges(regionContainers.Background, regionContainers.Data, vpCurrent, region)
+}
+func (rr *RegionRenderer) renderCellsRegionDelta(regionContainers RegionContainers, region GridRegion) {
+
+	pr := rr.primitiveRenderer
+	cm := rr.ctx.CoordManager
+
+	vpCurrent := rr.ctx.Viewports[region]
+	vpPrevious := rr.ctx.LastViewports[region]
+
+	rr.removeStandardCellsOutsideViewport(vpCurrent, vpPrevious, region)
+
+	rr.addStandardCellsInViewport(regionContainers, vpCurrent, vpPrevious, region)
+
+	pr.updateVisibleMerges(regionContainers, vpCurrent, region)
 
 	// every thing but main region need manually placed
 	if region != RegionMain {
 		for cellid, idx := range pr.textPrimitivesIndex[region] {
-			if cellid.Row == 3 {
-				fmt.Println("here")
-			}
 			item := pr.textPrimitives[region][idx]
 			item.Move(cm.GetPixelPos(region, cellid.Row, cellid.Col))
 		}
 
 		for cellid, idx := range pr.rectanglePrimitivesIndex[region] {
-			if cellid.Row == 3 {
-				fmt.Println("here")
-			}
 			item := pr.rectanglePrimitives[region][idx]
 			item.Move(cm.GetPixelPos(region, cellid.Row, cellid.Col))
 		}
@@ -210,54 +183,29 @@ func (rr *RegionRenderer) renderCellsRegionDelta(regionContainers RegionContaine
 
 func (rr *RegionRenderer) renderCellsRegionFull(regionContainers RegionContainers, region GridRegion) {
 
-	vp := rr.ctx.Viewports[region]
-	if 1 == 2 {
-		if region == RegionMain {
-			fmt.Printf("[VP-CURRENT-MAIN] FirstRow:%d, LastRow:%d, FirstCol:%d, LastCol:%d\n",
-				vp.FirstRowVisIdx, vp.LastRowVisIdx, vp.FirstColVisIdx, vp.LastColVisIdx)
-		}
-		if region == RegionFixedCorner {
-
-			fmt.Printf("[VP-CURRENT-FIXED-CORNER] FirstRow:%d, LastRow:%d, FirstCol:%d, LastCol:%d\n",
-				vp.FirstRowVisIdx, vp.LastRowVisIdx, vp.FirstColVisIdx, vp.LastColVisIdx)
-		}
-		if region == RegionFrozenCols {
-			fmt.Printf("[VP-CURRENT-FIXED-COLS] FirstRow:%d, LastRow:%d, FirstCol:%d, LastCol:%d\n",
-				vp.FirstRowVisIdx, vp.LastRowVisIdx, vp.FirstColVisIdx, vp.LastColVisIdx)
-		}
-		if region == RegionFrozenRows {
-			fmt.Printf("[VP-CURRENT-FIXED-ROWS] FirstRow:%d, LastRow:%d, FirstCol:%d, LastCol:%d\n",
-				vp.FirstRowVisIdx, vp.LastRowVisIdx, vp.FirstColVisIdx, vp.LastColVisIdx)
-		}
-	}
+	vpCurrent := rr.ctx.Viewports[region]
 
 	pr := rr.primitiveRenderer
 	cm := rr.ctx.CoordManager
 
-	for rowVisIdx := vp.FirstRowVisIdx; rowVisIdx <= vp.LastRowVisIdx; rowVisIdx++ {
+	for rowVisIdx := vpCurrent.FirstRowVisIdx; rowVisIdx <= vpCurrent.LastRowVisIdx; rowVisIdx++ {
 		rowModIdx := cm.GetRowModIdxFromVisIdx(rowVisIdx)
-		for colVisIdx := vp.FirstColVisIdx; colVisIdx <= vp.LastColVisIdx; colVisIdx++ {
+		for colVisIdx := vpCurrent.FirstColVisIdx; colVisIdx <= vpCurrent.LastColVisIdx; colVisIdx++ {
 			colModIdx := cm.GetColModIdxFromVisIdx(colVisIdx)
-			pr.addCell(regionContainers.Background, regionContainers.Data, rowModIdx, colModIdx, region)
+			pr.renderCell(regionContainers, rowModIdx, colModIdx, region)
 		}
 	}
 
-	pr.renderVisibleMerges(regionContainers.Background, regionContainers.Data, vp, region)
+	pr.updateVisibleMerges(regionContainers, vpCurrent, region)
 
 	// every thing but main region need manually placed
 	if region != RegionMain {
 		for cellid, idx := range pr.textPrimitivesIndex[region] {
-			if cellid.Row == 3 {
-				fmt.Println("here")
-			}
 			item := pr.textPrimitives[region][idx]
 			item.Move(cm.GetPixelPos(region, cellid.Row, cellid.Col))
 		}
 
 		for cellid, idx := range pr.rectanglePrimitivesIndex[region] {
-			if cellid.Row == 3 {
-				fmt.Println("here")
-			}
 			item := pr.rectanglePrimitives[region][idx]
 			item.Move(cm.GetPixelPos(region, cellid.Row, cellid.Col))
 		}
@@ -267,251 +215,136 @@ func (rr *RegionRenderer) renderCellsRegionFull(regionContainers RegionContainer
 
 }
 
-func (rr *RegionRenderer) renderGridlinesRegionDelta(regionContainer RegionContainers, region GridRegion, orientation LineOrientation, cache TransparencyCache) {
+func (rr *RegionRenderer) renderGridlinesRegionDelta(regionContainer RegionContainers, region GridRegion, orientation LineOrientation) {
+
 	var remainingRowStart, remainingRowEnd int
 
-	glr := rr.gridlineRenderer
+	gl := rr.gridlineRenderer
 
 	vpCurrent := rr.ctx.Viewports[region]
 	vpPrevious := rr.ctx.LastViewports[region]
 
-	//cache := pr.BackgroundTransparencyStates(region)
-	//if vpCurrent.FirstRowVisIdx > vpPrevious.FirstRowVisIdx {
-	//	glr.removeRowsTopH(vpCurrent, vpPrevious, region)
-	//}
-	if vpCurrent.FirstRowVisIdx > vpPrevious.FirstRowVisIdx {
-		glr.removeAxes1(vpPrevious.FirstRowVisIdx, vpCurrent.FirstRowVisIdx, region, orientation)
+	// remove top redundant rows
+	for primaryVisIdx := vpPrevious.FirstRowVisIdx; primaryVisIdx <= vpCurrent.FirstRowVisIdx-1; primaryVisIdx++ {
+		//if primaryVisIdx != 21 {
+		//	continue
+		//}
+		gl.Remove(primaryVisIdx, region, orientation)
 	}
 
-	//if vpCurrent.LastRowVisIdx < vpPrevious.LastRowVisIdx {
-	//	glr.removeRowsBottomH(vpCurrent, vpPrevious, region)
-	//}
-	if vpCurrent.LastRowVisIdx < vpPrevious.LastRowVisIdx {
-		glr.removeAxes2(vpCurrent.LastRowVisIdx, vpPrevious.LastRowVisIdx, region, orientation)
-	}
-
-	//if vpCurrent.FirstColVisIdx > vpPrevious.FirstColVisIdx {
-	//	glr.cleanupLeftEdgeH(vpCurrent, vpPrevious, region)
-	//}
-	if vpCurrent.FirstColVisIdx > vpPrevious.FirstColVisIdx {
-		glr.trimEdge1(vpCurrent.FirstRowVisIdx, vpCurrent.LastRowVisIdx, vpPrevious.FirstColVisIdx, vpCurrent.FirstColVisIdx, region, orientation)
-	}
-
-	//if vpCurrent.LastColVisIdx < vpPrevious.LastColVisIdx {
-	//	glr.cleanupRightEdgeH(vpCurrent, vpPrevious, region)
-	//}
-
-	if vpCurrent.LastColVisIdx < vpPrevious.LastColVisIdx {
-		glr.trimEdge2(vpCurrent.FirstRowVisIdx, vpCurrent.LastRowVisIdx, vpPrevious.LastColVisIdx, vpCurrent.LastColVisIdx, region, orientation)
-	}
-
-	//if vpCurrent.FirstRowVisIdx < vpPrevious.FirstRowVisIdx {
-	//	glr.renderLeftEdge(regionContainer.Gridline, vpCurrent.FirstRowVisIdx, vpPrevious.FirstRowVisIdx-1, vpCurrent.FirstColVisIdx, vpCurrent.LastColVisIdx, cache, region)
-	//}
-
-	if vpCurrent.FirstRowVisIdx < vpPrevious.FirstRowVisIdx {
-		glr.renderEdge1(regionContainer.Gridline, vpCurrent.FirstRowVisIdx, vpPrevious.FirstRowVisIdx-1, vpCurrent.FirstColVisIdx, vpCurrent.LastColVisIdx, cache, region, orientation, glr.isGridLineRequiredH)
-	}
-
-	//if vpCurrent.LastRowVisIdx > vpPrevious.LastRowVisIdx {
-	//	glr.renderLeftEdge(regionContainer.Gridline, vpPrevious.LastRowVisIdx, vpCurrent.LastRowVisIdx-1, vpCurrent.FirstColVisIdx, vpCurrent.LastColVisIdx, cache, region)
-	//}
-
-	if vpCurrent.LastRowVisIdx > vpPrevious.LastRowVisIdx {
-		glr.renderEdge1(regionContainer.Gridline, vpPrevious.LastRowVisIdx, vpCurrent.LastRowVisIdx-1, vpCurrent.FirstColVisIdx, vpCurrent.LastColVisIdx, cache, region, orientation, glr.isGridLineRequiredH)
+	for primaryVisIdx := vpCurrent.LastRowVisIdx + 1; primaryVisIdx <= vpPrevious.LastRowVisIdx; primaryVisIdx++ {
+		//if primaryVisIdx != 21 {
+		//	continue
+		//}
+		gl.Remove(primaryVisIdx, region, orientation)
 	}
 
 	remainingRowStart = max(vpPrevious.FirstRowVisIdx, vpCurrent.FirstRowVisIdx)
 	remainingRowEnd = min(vpPrevious.LastRowVisIdx, vpCurrent.LastRowVisIdx)
+	// remove left edge
+	if vpCurrent.FirstColVisIdx > vpPrevious.FirstColVisIdx {
+		for primaryVisIdx := remainingRowStart; primaryVisIdx <= remainingRowEnd; primaryVisIdx++ {
+			//if primaryVisIdx != 21 {
+			//	continue
+			//}
+			gl.TrimStart(primaryVisIdx, vpCurrent.FirstColVisIdx, region, orientation)
+		}
+	}
+	// remove right edge
+	if vpCurrent.LastColVisIdx < vpPrevious.LastColVisIdx {
+		for primaryVisIdx := remainingRowStart; primaryVisIdx <= remainingRowEnd; primaryVisIdx++ {
+			//if primaryVisIdx != 21 {
+			//	continue
+			//}
+			gl.TrimEnd(primaryVisIdx, vpCurrent.LastColVisIdx, region, orientation)
+		}
+	}
 
-	//if vpCurrent.FirstColVisIdx < vpPrevious.FirstColVisIdx {
-	//	glr.renderLeftEdge(regionContainer.Gridline, remainingRowStart, remainingRowEnd, vpCurrent.FirstColVisIdx, vpPrevious.FirstColVisIdx-1, cache, region)
-	//}
+	// add new top rows
+	for rowVisIdx := vpCurrent.FirstRowVisIdx; rowVisIdx < vpPrevious.FirstRowVisIdx; rowVisIdx++ {
+		//if rowVisIdx != 21 {
+		//	continue
+		//}
+		gl.Add(regionContainer.Gridline, rowVisIdx, vpCurrent.FirstColVisIdx, vpCurrent.LastColVisIdx, region, orientation)
+	}
+
+	// add new bottom rows
+	for rowVisIdx := vpCurrent.LastRowVisIdx; rowVisIdx > vpPrevious.LastRowVisIdx; rowVisIdx-- {
+		//if rowVisIdx != 21 {
+		//	continue
+		//}
+		gl.Add(regionContainer.Gridline, rowVisIdx, vpCurrent.FirstColVisIdx, vpCurrent.LastColVisIdx, region, orientation)
+	}
+
+	// extend items on the left
 	if vpCurrent.FirstColVisIdx < vpPrevious.FirstColVisIdx {
-		glr.renderEdge1(regionContainer.Gridline, remainingRowStart, remainingRowEnd, vpCurrent.FirstColVisIdx, vpPrevious.FirstColVisIdx-1, cache, region, orientation, glr.isGridLineRequiredH)
+		for primaryVisIdx := remainingRowStart; primaryVisIdx <= remainingRowEnd; primaryVisIdx++ {
+			//if primaryVisIdx != 21 {
+			//	continue
+			//}
+			if _, exists := gl.LineItems[region][orientation].Edges[primaryVisIdx]; exists {
+				gl.GrowStart(regionContainer.Gridline, primaryVisIdx, vpCurrent.FirstColVisIdx, region, orientation)
+			} else {
+				gl.Add(regionContainer.Gridline, primaryVisIdx, vpCurrent.FirstColVisIdx, vpCurrent.LastColVisIdx, region, orientation)
+			}
+		}
 	}
 
-	//if vpCurrent.LastColVisIdx > vpPrevious.LastColVisIdx {
-	//	glr.renderRightEdge(regionContainer.Gridline, remainingRowStart, remainingRowEnd, vpPrevious.LastColVisIdx+1, vpCurrent.LastColVisIdx, cache, region)
-	//}
+	// extend items on the right
 	if vpCurrent.LastColVisIdx > vpPrevious.LastColVisIdx {
-		glr.renderEdge2(regionContainer.Gridline, remainingRowStart, remainingRowEnd, vpPrevious.LastColVisIdx+1, vpCurrent.LastColVisIdx, cache, region, orientation, glr.isGridLineRequiredH)
-	}
-
-	glr.stashInCorner(region, orientation)
-	lower := 10
-	upper := -99
-	if 1 == 1 {
-		for itemId, _ := range glr.LineItems[region][orientation].ConfigLines {
-			if itemId < lower {
-				lower = itemId
-			}
-			if itemId > upper {
-				upper = itemId
+		for primaryVisIdx := remainingRowStart; primaryVisIdx <= remainingRowEnd; primaryVisIdx++ {
+			//if primaryVisIdx != 21 {
+			//	continue
+			//}
+			if _, exists := gl.LineItems[region][orientation].Edges[primaryVisIdx]; exists {
+				gl.GrowEnd(regionContainer.Gridline, primaryVisIdx, vpCurrent.LastColVisIdx, region, orientation)
+			} else {
+				gl.Add(regionContainer.Gridline, primaryVisIdx, vpCurrent.FirstColVisIdx, vpCurrent.LastColVisIdx, region, orientation)
 			}
 		}
-
-		for i := lower; i <= upper; i++ {
-			//	configItem := glr.hLineItems[region].ConfigLines[i]
-			//	fmt.Printf("[ITEM-LIST] Region:%s, Itemid:%d, Row:%d, ColStart:%d, ColEnd:%d, ItemCount:%d, ItemId:%d, RecycleBinItems:%d\n",
-			//		region.String(), i, configItem.Row, configItem.ColStart, configItem.ColEnd, len(glr.hLineItems[region].ConfigLines), i, glr.RecycleBinItems(region))
-		}
-		/*
-			rowId := 6
-
-			found := true
-
-			fmt.Printf("[ITEM-LIST-STARTING]\n")
-			for found {
-				found = false
-				for itemId, configItem := range glr.hLineItems[region].ConfigLines {
-					if configItem.Row == rowId {
-						fmt.Printf("[ITEM-LIST] Row:%d, ColStart:%d, ColEnd:%d, ItemCount:%d, ItemId:%d, RecycleBinItems:%d\n",
-							configItem.Row, configItem.ColStart, configItem.ColEnd, len(glr.hLineItems[region].ConfigLines), itemId+1, glr.RecycleBinItems(region))
-						found = true
-					}
-				}
-				rowId++
-			}
-		*/
-		//fmt.Printf("[ITEM-LIST-ENDING]\n")
-		//fmt.Printf("[ITEM-LIST-STATS] Region:%s, count:%d\n", region.String(), len(glr.LineItems[region][orientation].ConfigLines))
 	}
 
-	rr.positionGridlines(region, orientation)
+	//glr.stashFlaggedItems(region, orientation)
+	gl.stashFlaggedItems(region, orientation)
+	if region == RegionMain {
+		if 1 == 1 {
+			for i, configItem := range gl.LineItems[region][orientation].LinesConfig {
+				fmt.Printf("[ITEM-LIST] Row:%d, ColStart:%d, ColEnd:%d, ItemCount:%d, ItemId:%d, PrevId:%d, NextId:%d\n",
+					configItem.PrimaryAxis, configItem.SecondaryStart, configItem.SecondaryEnd, len(gl.LineItems[region][orientation].LinesConfig), i, configItem.PrevLineId, configItem.NextLineId)
+			}
 
+			for i, configItem := range gl.LineItems[region][orientation].Edges {
+				fmt.Printf("[EDGE-LIST] EdgeRow:%d, LeftMost:%d, RightMost:%d\n", i, configItem.Startmost, configItem.Endmost)
+			}
+		}
+	}
+
+	rr.frameCounters[region]++
+	if rr.frameCounters[region] > 6 {
+		gl.positionGridlines(region, orientation, true)
+		rr.frameCounters[region] = 0
+	} else {
+		gl.positionGridlines(region, orientation, false)
+
+	}
+
+	gl.fyneMoveStashedItems(region, orientation)
 }
 
 func (rr *RegionRenderer) renderGridlinesRegionFull(regionContainer RegionContainers,
 	region GridRegion,
-	orientation LineOrientation,
-	fn func(isTransparent TransparencyCache, i, j int) bool, cache TransparencyCache) {
-	glr := rr.gridlineRenderer
-	//pr := rr.primitiveRenderer
+	orientation LineOrientation) {
+
+	gl := rr.gridlineRenderer
 
 	vpCurrent := rr.ctx.Viewports[region]
 
-	//cache := pr.BackgroundTransparencyStates(region)
-
-	//glr.renderLeftEdge(regionContainer.Gridline, vpCurrent.FirstRowVisIdx, vpCurrent.LastRowVisIdx, vpCurrent.FirstColVisIdx, vpCurrent.LastColVisIdx, cache, region)
-
-	glr.renderEdge1(regionContainer.Gridline, vpCurrent.FirstRowVisIdx, vpCurrent.LastRowVisIdx, vpCurrent.FirstColVisIdx, vpCurrent.LastColVisIdx, cache, region, orientation, fn)
-	if region == RegionFixedCorner {
-		//fmt.Printf("[ITEM-LIST-CORNER] ElementNo:%d\n", glr.hLineItems[region].ConfigLines)
-		//fmt.Printf("[ITEM-LIST-CORNER] ElementNo:%d\n", glr.LineItems[region][orientation].ConfigLines)
-
-	}
-	glr.stashInCorner(region, orientation)
-	if 1 == 2 {
-		rowId := 6
-
-		found := true
-		fmt.Printf("[ITEM-LIST-STARTING]\n")
-		for found {
-			found = false
-			for itemId, configItem := range glr.LineItems[region][orientation].ConfigLines {
-				if configItem.PrimaryAxis == rowId {
-					fmt.Printf("[ITEM-LIST] Row:%d, ColStart:%d, ColEnd:%d, ItemCount:%d, ItemId:%d\n",
-						configItem.PrimaryAxis, configItem.SecondAxisStart, configItem.SecondAxisEnd, len(glr.LineItems[region][orientation].ConfigLines), itemId+1)
-					found = true
-				}
-			}
-			rowId++
-		}
-		fmt.Printf("[ITEM-LIST-ENDING]\n")
-		fmt.Printf("[ITEM-LIST-STATS] Region:%s, count:%d\n", region.String(), len(glr.LineItems[region][orientation].ConfigLines))
+	for rowVisIdx := vpCurrent.FirstRowVisIdx; rowVisIdx <= vpCurrent.LastRowVisIdx; rowVisIdx++ {
+		//if rowVisIdx != 21 {
+		//	continue
+		//}
+		gl.Add(regionContainer.Gridline, rowVisIdx, vpCurrent.FirstColVisIdx, vpCurrent.LastColVisIdx, region, orientation)
 	}
 
-	rr.positionGridlines(region, orientation)
-}
-
-func (rr *RegionRenderer) positionGridlines(region GridRegion, orientation LineOrientation) {
-	glr := rr.gridlineRenderer
-	cm := rr.ctx.CoordManager
-
-	if region == RegionMain {
-		for itemId, config := range glr.LineItems[region][orientation].ConfigLines {
-			if config.PrimaryAxis != -1 && config.UnPositioned {
-				rr.posAbsoluteGridline(itemId, config, region, orientation)
-			}
-		}
-		return // Done! Scroll container handles all movement
-	}
-
-	rr.frameCounters[region]++
-
-	if rr.frameCounters[region] >= 7 {
-		// FULL RECALC: absolute position for all
-		for itemId, config := range glr.LineItems[region][orientation].ConfigLines {
-			//for itemId, config := range glr.hLineItems[region].ConfigLines {
-			if config.PrimaryAxis != -1 {
-				rr.posAbsoluteGridline(itemId, config, region, orientation)
-			}
-		}
-		rr.frameCounters[region] = 0
-	} else {
-		for itemId, config := range glr.LineItems[region][orientation].ConfigLines {
-			//for itemId, config := range glr.hLineItems[region].ConfigLines {
-			if config.PrimaryAxis != -1 {
-				if config.UnPositioned {
-					rr.posAbsoluteGridline(itemId, config, region, orientation)
-				} else {
-					// DELTA movement
-					lineItem := glr.LineItems[region][orientation].Lines[itemId]
-					if region == RegionFrozenCols {
-						deltaY := cm.GetScrollDeltaY()
-						lineItem.Position1.Y -= deltaY
-						lineItem.Position2.Y -= deltaY
-					} else if region == RegionFrozenRows {
-						deltaX := cm.GetScrollDeltaX()
-						lineItem.Position1.X -= deltaX
-						lineItem.Position2.X -= deltaX
-					}
-
-				}
-			}
-		}
-	}
-}
-
-/*
-func (rr *RegionRenderer) posAbsoluteGridlineOld(id int, hConfig hLineConfig, region GridRegion) {
-
-		glr := rr.gridlineRenderer
-
-		item := glr.hLineItems[region].Lines[id]
-		cm := rr.ctx.CoordManager
-		y := cm.GetRowPixelPosEndY(region, cm.GetRowModIdxFromVisIdx(hConfig.Row))
-		item.Position1.Y = y
-		item.Position1.X = cm.GetColPixelPosX(region, cm.GetColModIdxFromVisIdx(hConfig.ColStart))
-		item.Position2.Y = y
-		item.Position2.X = cm.GetColPixelPosEndX(region, cm.GetColModIdxFromVisIdx(hConfig.ColEnd))
-
-		glr.hLineItems[region].ConfigLines[id].UnPositioned = false
-	}
-*/
-func (rr *RegionRenderer) posAbsoluteGridline(id int, config LineConfig, region GridRegion, orientation LineOrientation) {
-	glr := rr.gridlineRenderer
-	cm := rr.ctx.CoordManager
-
-	lineItems := glr.LineItems[region][orientation]
-	item := lineItems.Lines[id]
-
-	if orientation == Horizontal {
-		// Horizontal: Y is fixed (row), X varies (columns)
-		y := cm.GetRowPixelPosEndY(region, cm.GetRowModIdxFromVisIdx(config.PrimaryAxis))
-		item.Position1.Y = y
-		item.Position1.X = cm.GetColPixelPosX(region, cm.GetColModIdxFromVisIdx(config.SecondAxisStart))
-		item.Position2.Y = y
-		item.Position2.X = cm.GetColPixelPosEndX(region, cm.GetColModIdxFromVisIdx(config.SecondAxisEnd))
-	} else {
-		// Vertical: X is fixed (column), Y varies (rows)
-		x := cm.GetColPixelPosEndX(region, cm.GetColModIdxFromVisIdx(config.PrimaryAxis))
-		item.Position1.X = x
-		item.Position1.Y = cm.GetRowPixelPosY(region, cm.GetRowModIdxFromVisIdx(config.SecondAxisStart))
-		item.Position2.X = x
-		item.Position2.Y = cm.GetRowPixelPosEndY(region, cm.GetRowModIdxFromVisIdx(config.SecondAxisEnd))
-	}
-
-	glr.LineItems[region][orientation].ConfigLines[id].UnPositioned = false
+	gl.positionGridlines(region, orientation, true)
 }

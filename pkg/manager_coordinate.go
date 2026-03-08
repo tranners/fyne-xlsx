@@ -1,7 +1,6 @@
 package pkg
 
 import (
-	"fmt"
 	"sort"
 
 	"fyne.io/fyne/v2"
@@ -86,17 +85,6 @@ func (cm *CoordinateManager) SetSplitCell(grid *WorkSheetData) {
 }
 
 func (cm *CoordinateManager) rebuildRowLayout(grid *WorkSheetData) {
-
-	fmt.Println("TopLeftCell: ", grid.FreezePanes.TopLeftCell)
-	//cm.freezeModRowSplit = grid.FreezePanes.YSplit // Store model index
-
-	//endModColIdx, endModRowIdx, err := CellRefToCoordinates(grid.FreezePanes.TopLeftCell)
-	//if err != nil {
-	//	return
-	//}
-
-	//fmt.Println(endModColIdx, endModRowIdx)
-	//cm.freezeVisRowSplit = grid.FreezePanes.YSplit
 
 	cm.visRowMap = cm.visRowMap[:1]
 	cm.visRowMap[0] = RowLayout{ModIdx: -1, Height: 0, PixelStart: 0}
@@ -316,7 +304,7 @@ func (cm *CoordinateManager) GetScrollableSize() fyne.Size {
 	)
 }
 
-func (cm *CoordinateManager) CalculateViewports(scrollSize fyne.Size) [4]Viewport {
+func (cm *CoordinateManager) getViewports(scrollSize fyne.Size) [4]Viewport {
 
 	mainFirstRow := cm.findFirstVisRowIdx()
 	mainLastRow := cm.findLastVisRowIdx(scrollSize.Height)
@@ -326,11 +314,8 @@ func (cm *CoordinateManager) CalculateViewports(scrollSize fyne.Size) [4]Viewpor
 	var viewports [4]Viewport
 
 	viewports[RegionFixedCorner] = Viewport{
-		//FirstRowVisIdx: 1,
 		FirstRowVisIdx: min(1, cm.freezeVisRowSplit),
-		//LastRowVisIdx:  cm.freezeRowSplit,
-		LastRowVisIdx: cm.freezeVisRowSplit,
-		//FirstColVisIdx: 1,
+		LastRowVisIdx:  cm.freezeVisRowSplit,
 		FirstColVisIdx: min(1, cm.freezeVisColSplit),
 		LastColVisIdx:  cm.freezeVisColSplit,
 	}
@@ -343,13 +328,12 @@ func (cm *CoordinateManager) CalculateViewports(scrollSize fyne.Size) [4]Viewpor
 			viewports[RegionFixedCorner].LastColVisIdx)
 	*/
 	viewports[RegionFrozenRows] = Viewport{
-		//FirstRowVisIdx: 1,
 		FirstRowVisIdx: min(1, cm.freezeVisRowSplit),
-		//LastRowVisIdx:  cm.freezeRowSplit,
 		LastRowVisIdx:  cm.freezeVisRowSplit,
 		FirstColVisIdx: mainFirstCol,
 		LastColVisIdx:  mainLastCol,
 	}
+
 	/*
 		fmt.Printf("[VP-CURRENT-RegionFrozenRows] FirstRow:%d, LastRow:%d, FirstCol:%d, LastCol:%d\n",
 			viewports[RegionFrozenRows].FirstRowVisIdx,
@@ -360,7 +344,6 @@ func (cm *CoordinateManager) CalculateViewports(scrollSize fyne.Size) [4]Viewpor
 	viewports[RegionFrozenCols] = Viewport{
 		FirstRowVisIdx: mainFirstRow,
 		LastRowVisIdx:  mainLastRow,
-		//FirstColVisIdx: 1,
 		FirstColVisIdx: min(1, cm.freezeVisColSplit),
 		LastColVisIdx:  cm.freezeVisColSplit,
 	}
@@ -467,6 +450,13 @@ func (cm *CoordinateManager) GetColModIdxFromVisIdx(visIdx int) int {
 
 func (cm *CoordinateManager) GetRowModIdxFromVisIdx(visIdx int) int {
 	return cm.visRowMap[visIdx].ModIdx
+}
+
+func (cm *CoordinateManager) GetRowModIdxFromVisIdxSafe(visIdx int) (int, bool) {
+	if visIdx >= len(cm.visRowMap) {
+		return -1, false
+	}
+	return cm.visRowMap[visIdx].ModIdx, true
 }
 
 func (cm *CoordinateManager) GetCellSizeByModIdx(rowModIdx, colModIdx int) fyne.Size {

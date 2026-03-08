@@ -25,6 +25,8 @@ type RenderContext struct {
 	MergeManager *MergeManager
 	GroupManager *GroupManager
 
+	PrimitiveRenderer *PrimitiveRenderer
+
 	Data *WorkSheetData
 
 	GroupPool    *sync.Pool
@@ -59,6 +61,8 @@ func NewRenderContext(data *WorkSheetData) *RenderContext {
 
 	ctx.MergeManager = NewMergeManager(ctx.CoordManager, ctx.Data)
 
+	ctx.MergeManager.Init()
+
 	ctx.GroupPool = &sync.Pool{
 		New: func() interface{} {
 			extentLine := canvas.NewLine(color.NRGBA{R: 100, G: 100, B: 100, A: 255})
@@ -91,7 +95,7 @@ func NewRenderContext(data *WorkSheetData) *RenderContext {
 
 func (ctx *RenderContext) UpdateViewports(scrollSize fyne.Size) {
 	cm := ctx.CoordManager
-	ctx.Viewports = cm.CalculateViewports(scrollSize)
+	ctx.Viewports = cm.getViewports(scrollSize)
 }
 
 func (ctx *RenderContext) FinalizeRenderCycle() {
@@ -111,6 +115,9 @@ func (ctx *RenderContext) DataChanged() {
 	cm.SetSplitCell(ctx.Data)
 	cm.rebuildColLayout(ctx.Data)
 	cm.rebuildRowLayout(ctx.Data)
+
+	// merge rebuild()
+	mm.Rebuild()
 
 	gm.buildColGroupsFromOutlineLevels(
 		ctx.Data.ColGroupOutlineLevels,
