@@ -115,12 +115,33 @@ func NewGridRenderer(data *WorkSheetData, fontmgr *FontManager) *GridRenderer {
 	}
 
 	r.initializeContainers()
+	r.initializeStaticHeaders()
 	r.setupScrollCallback()
-	r.buildMainContainer()
+	r.buildParentContainer()
 
 	return r
 }
 
+func (r *GridRenderer) initializeStaticHeaders() {
+	ctx := r.context
+	cm := ctx.CoordManager
+	hr := r.headerRenderer
+
+	if !ctx.Data.Settings.ShowHeadings {
+		return
+	}
+
+	hr.renderCornerHDR(r.cnrHdrContainer)
+	if cm.HasFrozenRows() {
+		hr.renderFixedRowHDRs(r.rowHdrFrozenContainer)
+	}
+
+	if cm.HasFrozenColumns() {
+		hr.renderFixedColumnHDRs(r.colHdrFrozenContainer)
+	}
+	// Future: when column freeze headers and corner are enabled,
+	// add hr.renderFixedColumnHeaders / hr.RenderCorner here too
+}
 func (r *GridRenderer) isValidViewport(region GridRegion) bool {
 	ctx := r.context
 
@@ -142,6 +163,7 @@ func (r *GridRenderer) isValidViewport(region GridRegion) bool {
 func (r *GridRenderer) renderOrchestrator(forceFullRender bool) {
 	ctx := r.context
 	cm := ctx.CoordManager
+	hr := r.headerRenderer
 
 	scrollChange := ctx.ScrollOffsetChanged()
 
@@ -191,36 +213,20 @@ func (r *GridRenderer) renderOrchestrator(forceFullRender bool) {
 			ctx.SheetRenderState = RenderStateRunning
 			// From this point forward, viewport validation checks are bypassed
 			if ctx.Data.Settings.ShowHeadings {
-				// If we have Headers; do a Full Render Now
-				hr := r.headerRenderer
-
-				hr.renderFullColumnHeaders(r.colHdrContainer)
-
-				hr.renderFullRowHeaders(r.rowHdrContainer)
-
-				if hasFrozenCols {
-					hr.renderFixedColumnHeaders(r.colHdrFrozenContainer)
-				}
-
-				if hasFrozenRows {
-					hr.renderFixedRowHeaders(r.rowHdrFrozenContainer)
-				}
-
-				hr.RenderCorner(r.cnrHdrContainer)
+				hr.UpdateScrollableHeaders(r.colHdrContainer, COLUMN, true)
+				hr.UpdateScrollableHeaders(r.rowHdrContainer, ROW, true)
 			}
 		}
-
 	} else {
 		if ctx.Data.Settings.ShowHeadings {
-			hr := r.headerRenderer
-
 			if scrollChange.X || forceFullRender {
-				hr.renderColumnHeaders(r.colHdrContainer)
+				renderAbsolute := forceFullRender || r.regionRenderer.frameCounters[RegionMain] == 0
+				hr.UpdateScrollableHeaders(r.colHdrContainer, COLUMN, renderAbsolute)
 			}
 			if scrollChange.Y || forceFullRender {
-				hr.renderRowHeaders(r.rowHdrContainer)
+				renderAbsolute := forceFullRender || r.regionRenderer.frameCounters[RegionMain] == 0
+				hr.UpdateScrollableHeaders(r.rowHdrContainer, ROW, renderAbsolute)
 			}
-
 		}
 		// === GROUPS ===
 		hasColGroups := len(ctx.GroupManager.colGroups) > 0
@@ -244,10 +250,6 @@ func (r *GridRenderer) renderOrchestrator(forceFullRender bool) {
 				gr.RenderFixedRowGroups(r.rowGroupFrozenContainer)
 			}
 		}
-
-		dr := r.dividerRenderer
-		dr.updateDividers(r.freezePaneDividerContainer)
-
 	}
 	ctx.FinalizeRenderCycle()
 }
@@ -307,6 +309,12 @@ func (r *GridRenderer) initializeContainers() {
 
 	r.freezePaneDividerContainer = container.NewWithoutLayout()
 
+	// dividers (for column freeze)
+	r.freezePaneDividerContainer.Add(r.dividerRenderer.V)
+	r.freezePaneDividerContainer.Add(r.dividerRenderer.H)
+
+	// base header objects
+	r.headerRenderer.mountHeaderBasics(r.colHdrContainer, r.colHdrFrozenContainer, r.rowHdrContainer, r.rowHdrFrozenContainer)
 }
 
 func (r *GridRenderer) setupScrollCallback() {
@@ -321,7 +329,7 @@ func (r *GridRenderer) setupScrollCallback() {
 	}
 }
 
-func (r *GridRenderer) buildMainContainer() {
+func (r *GridRenderer) buildParentContainer() {
 	ctx := r.context
 
 	mainApp := container.New(r,
@@ -355,8 +363,6 @@ func (r *GridRenderer) Layout(objects []fyne.CanvasObject, size fyne.Size) {
 	gm := r.context.GroupManager
 
 	// Determine freeze pane state
-	//hasRowFreeze := cm.GetVisibleFrozenRows() > 0
-	//hasColFreeze := cm.GetVisibleFrozenColumns() > 0
 	hasRowFreeze := cm.GetFrozenRows() > 0
 	hasColFreeze := cm.GetFrozenColumns() > 0
 	// Determine group header state
@@ -571,11 +577,36 @@ func (r *GridRenderer) MinSize(objects []fyne.CanvasObject) fyne.Size {
 
 func (r *GridRenderer) OnResize(newSize fyne.Size) {
 	ctx := r.context
+	hr := r.headerRenderer
+	cm := ctx.CoordManager
+	dr := r.dividerRenderer
 
 	ctx.UpdateViewports(r.scroll.Size())
-
-	//fmt.Printf("[SCROLL-RESIZE] Width:%f, Height:%f\n", r.scroll.Size().Width, r.scroll.Size().Height)
+	dr.updateDividers(r.freezePaneDividerContainer)
 	r.renderOrchestrator(true)
+
+	size := cm.GetScrollableSize()
+
+	c := r.colHdrContainer
+	hr.backgroundCols.Resize(fyne.NewSize(size.Width, c.Size().Height))
+	hr.edgeCols.Position1 = fyne.NewPos(0, c.Size().Height)
+	hr.edgeCols.Position2 = fyne.NewPos(size.Width, c.Size().Height)
+
+	c = r.colHdrFrozenContainer
+	hr.backgroundFixedCols.Resize(fyne.NewSize(c.Size().Width, c.Size().Height))
+	hr.edgeFixedCols.Position1 = fyne.NewPos(0, c.Size().Height)
+	hr.edgeFixedCols.Position2 = fyne.NewPos(c.Size().Width, c.Size().Height)
+
+	c = r.rowHdrContainer
+	hr.backgroundRows.Resize(fyne.NewSize(c.Size().Width, size.Height))
+	hr.edgeRows.Position1 = fyne.NewPos(c.Size().Width, 0)
+	hr.edgeRows.Position2 = fyne.NewPos(c.Size().Width, size.Height)
+
+	c = r.rowHdrFrozenContainer
+	hr.backgroundFixedRows.Resize(fyne.NewSize(c.Size().Width, c.Size().Height))
+	hr.edgeFixedRows.Position1 = fyne.NewPos(c.Size().Width, 0)
+	hr.edgeFixedRows.Position2 = fyne.NewPos(c.Size().Width, c.Size().Height)
+
 }
 
 func (r *GridRenderer) updateScrollContentSize() {

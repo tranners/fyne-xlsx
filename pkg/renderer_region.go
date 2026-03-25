@@ -1,9 +1,5 @@
 package pkg
 
-import (
-	"fmt"
-)
-
 type RegionRenderer struct {
 	ctx               *RenderContext
 	fontManager       *FontManager
@@ -41,8 +37,7 @@ func (r *GridRenderer) renderRegion(
 		if r.isValidViewport(region) {
 			// Viewport is ready → Do FULL render
 			rr.renderCellsRegionFull(containers, region)
-
-			rr.renderGridlinesRegionFull(containers, region, Horizontal)
+			rr.renderGridlinesRegionFull(containers, region)
 
 			ctx.PaneHasRenderedOnce[region] = true
 		}
@@ -65,7 +60,7 @@ func (r *GridRenderer) renderRegion(
 		if shouldRender {
 			rr.renderCellsRegionDelta(containers, region)
 
-			rr.renderGridlinesRegionDelta(containers, region, Horizontal)
+			rr.renderGridlinesRegionDelta(containers, region)
 		}
 	}
 }
@@ -215,136 +210,164 @@ func (rr *RegionRenderer) renderCellsRegionFull(regionContainers RegionContainer
 
 }
 
-func (rr *RegionRenderer) renderGridlinesRegionDelta(regionContainer RegionContainers, region GridRegion, orientation LineOrientation) {
-
-	var remainingRowStart, remainingRowEnd int
-
+func (rr *RegionRenderer) renderGridlinesRegionDelta(regionContainer RegionContainers, region GridRegion) {
 	gl := rr.gridlineRenderer
 
 	vpCurrent := rr.ctx.Viewports[region]
 	vpPrevious := rr.ctx.LastViewports[region]
 
+	gl.SetWaterMark(region, Horizontal)
+	gl.SetWaterMark(region, Vertical)
+
 	// remove top redundant rows
 	for primaryVisIdx := vpPrevious.FirstRowVisIdx; primaryVisIdx <= vpCurrent.FirstRowVisIdx-1; primaryVisIdx++ {
-		//if primaryVisIdx != 21 {
-		//	continue
-		//}
-		gl.Remove(primaryVisIdx, region, orientation)
+		gl.Remove(primaryVisIdx, region, Horizontal)
 	}
-
+	// remove bottom redundant rows
 	for primaryVisIdx := vpCurrent.LastRowVisIdx + 1; primaryVisIdx <= vpPrevious.LastRowVisIdx; primaryVisIdx++ {
-		//if primaryVisIdx != 21 {
-		//	continue
-		//}
-		gl.Remove(primaryVisIdx, region, orientation)
+		gl.Remove(primaryVisIdx, region, Horizontal)
 	}
 
-	remainingRowStart = max(vpPrevious.FirstRowVisIdx, vpCurrent.FirstRowVisIdx)
-	remainingRowEnd = min(vpPrevious.LastRowVisIdx, vpCurrent.LastRowVisIdx)
+	remainingRowStart := max(vpPrevious.FirstRowVisIdx, vpCurrent.FirstRowVisIdx)
+	remainingRowEnd := min(vpPrevious.LastRowVisIdx, vpCurrent.LastRowVisIdx)
+
 	// remove left edge
 	if vpCurrent.FirstColVisIdx > vpPrevious.FirstColVisIdx {
 		for primaryVisIdx := remainingRowStart; primaryVisIdx <= remainingRowEnd; primaryVisIdx++ {
-			//if primaryVisIdx != 21 {
-			//	continue
-			//}
-			gl.TrimStart(primaryVisIdx, vpCurrent.FirstColVisIdx, region, orientation)
+			gl.TrimStart(primaryVisIdx, vpCurrent.FirstColVisIdx, region, Horizontal)
 		}
 	}
 	// remove right edge
 	if vpCurrent.LastColVisIdx < vpPrevious.LastColVisIdx {
 		for primaryVisIdx := remainingRowStart; primaryVisIdx <= remainingRowEnd; primaryVisIdx++ {
-			//if primaryVisIdx != 21 {
-			//	continue
-			//}
-			gl.TrimEnd(primaryVisIdx, vpCurrent.LastColVisIdx, region, orientation)
+			gl.TrimEnd(primaryVisIdx, vpCurrent.LastColVisIdx, region, Horizontal)
 		}
 	}
 
 	// add new top rows
 	for rowVisIdx := vpCurrent.FirstRowVisIdx; rowVisIdx < vpPrevious.FirstRowVisIdx; rowVisIdx++ {
-		//if rowVisIdx != 21 {
-		//	continue
-		//}
-		gl.Add(regionContainer.Gridline, rowVisIdx, vpCurrent.FirstColVisIdx, vpCurrent.LastColVisIdx, region, orientation)
+		gl.Add(rowVisIdx, vpCurrent.FirstColVisIdx, vpCurrent.LastColVisIdx, region, Horizontal)
 	}
-
 	// add new bottom rows
 	for rowVisIdx := vpCurrent.LastRowVisIdx; rowVisIdx > vpPrevious.LastRowVisIdx; rowVisIdx-- {
-		//if rowVisIdx != 21 {
-		//	continue
-		//}
-		gl.Add(regionContainer.Gridline, rowVisIdx, vpCurrent.FirstColVisIdx, vpCurrent.LastColVisIdx, region, orientation)
+		gl.Add(rowVisIdx, vpCurrent.FirstColVisIdx, vpCurrent.LastColVisIdx, region, Horizontal)
 	}
 
 	// extend items on the left
 	if vpCurrent.FirstColVisIdx < vpPrevious.FirstColVisIdx {
 		for primaryVisIdx := remainingRowStart; primaryVisIdx <= remainingRowEnd; primaryVisIdx++ {
-			//if primaryVisIdx != 21 {
-			//	continue
-			//}
-			if _, exists := gl.LineItems[region][orientation].Edges[primaryVisIdx]; exists {
-				gl.GrowStart(regionContainer.Gridline, primaryVisIdx, vpCurrent.FirstColVisIdx, region, orientation)
+			if _, exists := gl.LineItems[region][Horizontal].Edges[primaryVisIdx]; exists {
+				gl.GrowStart(primaryVisIdx, vpCurrent.FirstColVisIdx, region, Horizontal)
 			} else {
-				gl.Add(regionContainer.Gridline, primaryVisIdx, vpCurrent.FirstColVisIdx, vpCurrent.LastColVisIdx, region, orientation)
+				gl.Add(primaryVisIdx, vpCurrent.FirstColVisIdx, vpCurrent.LastColVisIdx, region, Horizontal)
 			}
 		}
 	}
-
 	// extend items on the right
 	if vpCurrent.LastColVisIdx > vpPrevious.LastColVisIdx {
 		for primaryVisIdx := remainingRowStart; primaryVisIdx <= remainingRowEnd; primaryVisIdx++ {
-			//if primaryVisIdx != 21 {
-			//	continue
-			//}
-			if _, exists := gl.LineItems[region][orientation].Edges[primaryVisIdx]; exists {
-				gl.GrowEnd(regionContainer.Gridline, primaryVisIdx, vpCurrent.LastColVisIdx, region, orientation)
+			if _, exists := gl.LineItems[region][Horizontal].Edges[primaryVisIdx]; exists {
+				gl.GrowEnd(primaryVisIdx, vpCurrent.LastColVisIdx, region, Horizontal)
 			} else {
-				gl.Add(regionContainer.Gridline, primaryVisIdx, vpCurrent.FirstColVisIdx, vpCurrent.LastColVisIdx, region, orientation)
+				gl.Add(primaryVisIdx, vpCurrent.FirstColVisIdx, vpCurrent.LastColVisIdx, region, Horizontal)
 			}
 		}
 	}
 
-	//glr.stashFlaggedItems(region, orientation)
-	gl.stashFlaggedItems(region, orientation)
-	if region == RegionMain {
-		if 1 == 1 {
-			for i, configItem := range gl.LineItems[region][orientation].LinesConfig {
-				fmt.Printf("[ITEM-LIST] Row:%d, ColStart:%d, ColEnd:%d, ItemCount:%d, ItemId:%d, PrevId:%d, NextId:%d\n",
-					configItem.PrimaryAxis, configItem.SecondaryStart, configItem.SecondaryEnd, len(gl.LineItems[region][orientation].LinesConfig), i, configItem.PrevLineId, configItem.NextLineId)
-			}
+	// remove left redundant cols (cols that have scrolled out of view on the left)
+	for primaryVisIdx := vpPrevious.FirstColVisIdx; primaryVisIdx <= vpCurrent.FirstColVisIdx-1; primaryVisIdx++ {
+		gl.Remove(primaryVisIdx, region, Vertical)
+	}
+	// remove right redundant cols (cols that have scrolled out of view on the right)
+	for primaryVisIdx := vpCurrent.LastColVisIdx + 1; primaryVisIdx <= vpPrevious.LastColVisIdx; primaryVisIdx++ {
+		gl.Remove(primaryVisIdx, region, Vertical)
+	}
 
-			for i, configItem := range gl.LineItems[region][orientation].Edges {
-				fmt.Printf("[EDGE-LIST] EdgeRow:%d, LeftMost:%d, RightMost:%d\n", i, configItem.Startmost, configItem.Endmost)
+	remainingColStart := max(vpPrevious.FirstColVisIdx, vpCurrent.FirstColVisIdx)
+	remainingColEnd := min(vpPrevious.LastColVisIdx, vpCurrent.LastColVisIdx)
+
+	// remove top edge (vertical lines whose secondary/row-start is now above the viewport)
+	if vpCurrent.FirstRowVisIdx > vpPrevious.FirstRowVisIdx {
+		for primaryVisIdx := remainingColStart; primaryVisIdx <= remainingColEnd; primaryVisIdx++ {
+			gl.TrimStart(primaryVisIdx, vpCurrent.FirstRowVisIdx, region, Vertical)
+		}
+	}
+	// remove bottom edge (vertical lines whose secondary/row-end is now below the viewport)
+	if vpCurrent.LastRowVisIdx < vpPrevious.LastRowVisIdx {
+		for primaryVisIdx := remainingColStart; primaryVisIdx <= remainingColEnd; primaryVisIdx++ {
+			gl.TrimEnd(primaryVisIdx, vpCurrent.LastRowVisIdx, region, Vertical)
+		}
+	}
+
+	// add new left cols
+	for colVisIdx := vpCurrent.FirstColVisIdx; colVisIdx < vpPrevious.FirstColVisIdx; colVisIdx++ {
+		gl.Add(colVisIdx, vpCurrent.FirstRowVisIdx, vpCurrent.LastRowVisIdx, region, Vertical)
+	}
+	// add new right cols
+	for colVisIdx := vpCurrent.LastColVisIdx; colVisIdx > vpPrevious.LastColVisIdx; colVisIdx-- {
+		gl.Add(colVisIdx, vpCurrent.FirstRowVisIdx, vpCurrent.LastRowVisIdx, region, Vertical)
+	}
+
+	// extend items on the top (vertical lines that need to grow upward)
+	if vpCurrent.FirstRowVisIdx < vpPrevious.FirstRowVisIdx {
+		for primaryVisIdx := remainingColStart; primaryVisIdx <= remainingColEnd; primaryVisIdx++ {
+			if _, exists := gl.LineItems[region][Vertical].Edges[primaryVisIdx]; exists {
+				gl.GrowStart(primaryVisIdx, vpCurrent.FirstRowVisIdx, region, Vertical)
+			} else {
+				gl.Add(primaryVisIdx, vpCurrent.FirstRowVisIdx, vpCurrent.LastRowVisIdx, region, Vertical)
 			}
 		}
 	}
+	// extend items on the bottom (vertical lines that need to grow downward)
+	if vpCurrent.LastRowVisIdx > vpPrevious.LastRowVisIdx {
+		for primaryVisIdx := remainingColStart; primaryVisIdx <= remainingColEnd; primaryVisIdx++ {
+			if _, exists := gl.LineItems[region][Vertical].Edges[primaryVisIdx]; exists {
+				gl.GrowEnd(primaryVisIdx, vpCurrent.LastRowVisIdx, region, Vertical)
+			} else {
+				gl.Add(primaryVisIdx, vpCurrent.FirstRowVisIdx, vpCurrent.LastRowVisIdx, region, Vertical)
+			}
+		}
+	}
+
+	gl.fyneAddContent(regionContainer.Gridline, region, Horizontal)
+	gl.fyneAddContent(regionContainer.Gridline, region, Vertical)
+
+	gl.fyneMoveHotPoolItems(region, Horizontal)
+	gl.fyneMoveHotPoolItems(region, Vertical)
 
 	rr.frameCounters[region]++
 	if rr.frameCounters[region] > 6 {
-		gl.positionGridlines(region, orientation, true)
+		gl.fynePositionGridlines(region, Horizontal, true)
+		gl.fynePositionGridlines(region, Vertical, true)
 		rr.frameCounters[region] = 0
 	} else {
-		gl.positionGridlines(region, orientation, false)
-
+		gl.fynePositionGridlines(region, Horizontal, false)
+		gl.fynePositionGridlines(region, Vertical, false)
 	}
-
-	gl.fyneMoveStashedItems(region, orientation)
 }
 
 func (rr *RegionRenderer) renderGridlinesRegionFull(regionContainer RegionContainers,
-	region GridRegion,
-	orientation LineOrientation) {
+	region GridRegion) {
 
 	gl := rr.gridlineRenderer
 
 	vpCurrent := rr.ctx.Viewports[region]
 
+	gl.SetWaterMark(region, Horizontal)
+	gl.SetWaterMark(region, Vertical)
+
 	for rowVisIdx := vpCurrent.FirstRowVisIdx; rowVisIdx <= vpCurrent.LastRowVisIdx; rowVisIdx++ {
-		//if rowVisIdx != 21 {
-		//	continue
-		//}
-		gl.Add(regionContainer.Gridline, rowVisIdx, vpCurrent.FirstColVisIdx, vpCurrent.LastColVisIdx, region, orientation)
+		gl.Add(rowVisIdx, vpCurrent.FirstColVisIdx, vpCurrent.LastColVisIdx, region, Horizontal)
 	}
 
-	gl.positionGridlines(region, orientation, true)
+	for colVisIdx := vpCurrent.FirstColVisIdx; colVisIdx <= vpCurrent.LastColVisIdx; colVisIdx++ {
+		gl.Add(colVisIdx, vpCurrent.FirstRowVisIdx, vpCurrent.LastRowVisIdx, region, Vertical)
+	}
+
+	gl.fyneAddContent(regionContainer.Gridline, region, Horizontal)
+	gl.fyneAddContent(regionContainer.Gridline, region, Vertical)
+
+	gl.fynePositionGridlines(region, Horizontal, true)
+	gl.fynePositionGridlines(region, Vertical, true)
+
 }

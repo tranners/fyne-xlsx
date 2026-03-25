@@ -9,16 +9,12 @@ import (
 
 // Freeze pane divider styling (similar to Excel)
 var freezeDividerColor = color.NRGBA{R: 135, G: 135, B: 135, A: 255} // Dark gray
-const freezeDividerWidth = float32(1)                                // Thicker than cell borders
-
-type DividerCarcuss struct {
-	HDivider *canvas.Line
-	VDivider *canvas.Line
-}
+const freezeDividerWidth = float32(1)
 
 type DividerRenderer struct {
-	ctx     *RenderContext
-	divider DividerCarcuss
+	ctx *RenderContext
+	H   *canvas.Line
+	V   *canvas.Line
 }
 
 func NewDividerRenderer(ctx *RenderContext) *DividerRenderer {
@@ -26,12 +22,11 @@ func NewDividerRenderer(ctx *RenderContext) *DividerRenderer {
 	vDivider.StrokeWidth = freezeDividerWidth
 	hDivider := canvas.NewLine(freezeDividerColor)
 	hDivider.StrokeWidth = freezeDividerWidth
+
 	return &DividerRenderer{
 		ctx: ctx,
-		divider: DividerCarcuss{
-			HDivider: vDivider,
-			VDivider: hDivider,
-		},
+		H:   hDivider,
+		V:   vDivider,
 	}
 }
 
@@ -40,11 +35,11 @@ func (dr *DividerRenderer) updateDividers(dividerContainer *fyne.Container) {
 	cm := ctx.CoordManager
 	gm := ctx.GroupManager
 
-	dividerContainer.Objects = nil
-
 	freezeWidth, freezeHeight := cm.GetFreezeOffsets()
 
 	if freezeWidth == 0 && freezeHeight == 0 {
+		dr.H.Hide()
+		dr.V.Hide()
 		return
 	}
 
@@ -69,19 +64,17 @@ func (dr *DividerRenderer) updateDividers(dividerContainer *fyne.Container) {
 	leftOffset := rowGroupWidth + rowHdrWidth
 	topOffset := colGroupHeight + colHdrHeight
 
-	// Vertical divider (for column freeze)
 	if freezeWidth > 0 {
 		x := leftOffset + freezeWidth
-		dr.divider.VDivider.Position1 = fyne.NewPos(x, topOffset)
-		dr.divider.VDivider.Position2 = fyne.NewPos(x, dividerContainer.Size().Height)
-		dividerContainer.Add(dr.divider.VDivider)
+		dr.V.Position1 = fyne.NewPos(x, topOffset)
+		dr.V.Position2 = fyne.NewPos(x, dividerContainer.Size().Height)
+		dr.V.Show()
 	}
 
-	// Horizontal divider (for row freeze)
 	if freezeHeight > 0 {
 		y := topOffset + freezeHeight
-		dr.divider.HDivider.Position1 = fyne.NewPos(leftOffset, y)
-		dr.divider.HDivider.Position2 = fyne.NewPos(dividerContainer.Size().Width, y)
-		dividerContainer.Add(dr.divider.HDivider)
+		dr.H.Position1 = fyne.NewPos(leftOffset, y)
+		dr.H.Position2 = fyne.NewPos(dividerContainer.Size().Width, y)
+		dr.H.Show()
 	}
 }

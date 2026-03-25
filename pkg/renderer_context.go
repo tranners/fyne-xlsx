@@ -100,6 +100,8 @@ func (ctx *RenderContext) UpdateViewports(scrollSize fyne.Size) {
 
 func (ctx *RenderContext) FinalizeRenderCycle() {
 	copy(ctx.LastViewports[:], ctx.Viewports[:])
+	// in case windows was re-sized; no scroll event fires
+	ctx.CoordManager.prevScrollOffset = ctx.CoordManager.scrollOffset
 }
 
 func (ctx *RenderContext) SetScrollOffset(offset fyne.Position) {

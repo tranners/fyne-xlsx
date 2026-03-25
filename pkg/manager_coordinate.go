@@ -448,6 +448,13 @@ func (cm *CoordinateManager) GetColModIdxFromVisIdx(visIdx int) int {
 	return cm.visColMap[visIdx].ModIdx
 }
 
+func (cm *CoordinateManager) GetColModIdxFromVisIdxSafe(visIdx int) (int, bool) {
+	if visIdx >= len(cm.visColMap) {
+		return -1, false
+	}
+	return cm.visColMap[visIdx].ModIdx, true
+}
+
 func (cm *CoordinateManager) GetRowModIdxFromVisIdx(visIdx int) int {
 	return cm.visRowMap[visIdx].ModIdx
 }

@@ -3,292 +3,383 @@ package pkg
 import (
 	"fmt"
 	"image/color"
-	"sync"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
-	"fyne.io/fyne/v2/container"
 )
 
-// corner
-var headerBackgroundColor = color.NRGBA{R: 243, G: 243, B: 243, A: 255} // #D9D9D9 - Light gray
-// var headerBorderColor = color.NRGBA{R: 198, G: 198, B: 198, A: 225}
-var headerBorderColor = color.NRGBA{R: 212, G: 212, B: 212, A: 225}
+type HDRType int
+
+const (
+	ROW HDRType = iota
+	COLUMN
+)
+
+const headerFontSize = 11
+const offscreenCoord float32 = -9999
+const estimatedCapacity = 50
 
 // headers
-var headerBorderLightColor = color.NRGBA{R: 212, G: 212, B: 212, A: 225}
-
-// var headerBorderLightColor = color.NRGBA{R: 198, G: 198, B: 198, A: 120}
-// var headerBorderDarkColor = color.NRGBA{R: 198, G: 198, B: 198, A: 255}
+var headerBorderLightColor = color.NRGBA{R: 217, G: 217, B: 217, A: 170}
 var headerBorderDarkColor = color.NRGBA{R: 212, G: 212, B: 212, A: 225}
 
-type HeaderCarcuss struct {
-	Container    *fyne.Container
-	Background   *canvas.Rectangle
-	Label        *canvas.Text
-	RightBorder  *canvas.Line
-	BottomBorder *canvas.Line
-}
-
 type HeaderRenderer struct {
-	ctx              *RenderContext
-	colHeadersScroll map[int]*HeaderCarcuss
-	colHeadersFixed  map[int]*HeaderCarcuss
-	rowHeadersScroll map[int]*HeaderCarcuss
-	rowHeadersFixed  map[int]*HeaderCarcuss
-	recyclerRows     *HeaderRecycler
-	recyclerColumns  *HeaderRecycler
+	ctx *RenderContext
+
+	backgroundFixedRows *canvas.Rectangle
+	backgroundRows      *canvas.Rectangle
+	backgroundFixedCols *canvas.Rectangle
+	backgroundCols      *canvas.Rectangle
+	edgeFixedRows       *canvas.Line
+	edgeRows            *canvas.Line
+	edgeFixedCols       *canvas.Line
+	edgeCols            *canvas.Line
+
+	fyneMountedCountCols int
+	fyneMountedCountRows int
+
+	hdrItemsRows HDRItems
+	hdrItemsCols HDRItems
+
+	hdrLabelColY float32
+	hdrLabelRowY float32
 }
 
-type HeaderRecycler struct {
-	mu    sync.Mutex
-	items []*HeaderCarcuss
+type HDRSlot struct {
+	Label       *canvas.Text
+	Line        *canvas.Line
+	Initialised bool
 }
 
-func NewHeaderRecycler() *HeaderRecycler {
-	return &HeaderRecycler{
-		mu:    sync.Mutex{},
-		items: []*HeaderCarcuss{},
+type HDRItems struct {
+	Slots    []HDRSlot
+	Index    map[int]int
+	hotPool  []int
+	coldPool []int
+}
+
+func (hr *HeaderRenderer) hdrItems(t HDRType) (*HDRItems, int) {
+	if t == COLUMN {
+		return &hr.hdrItemsCols, hr.fyneMountedCountCols
 	}
+	return &hr.hdrItemsRows, hr.fyneMountedCountRows
 }
 
-// Headers and groups get SAME context
 func NewHeaderRenderer(ctx *RenderContext) *HeaderRenderer {
+
+	probe := canvas.NewText("A", color.Black)
+	probe.TextSize = headerFontSize
+	heightCol := (HeaderHeight / 2) - (probe.MinSize().Height / 2)
+	heightRow := probe.MinSize().Height / 2
 	return &HeaderRenderer{
-		ctx:              ctx,
-		colHeadersScroll: make(map[int]*HeaderCarcuss),
-		colHeadersFixed:  make(map[int]*HeaderCarcuss),
-		rowHeadersScroll: make(map[int]*HeaderCarcuss),
-		rowHeadersFixed:  make(map[int]*HeaderCarcuss),
-		recyclerRows:     NewHeaderRecycler(),
-		recyclerColumns:  NewHeaderRecycler(),
+		ctx: ctx,
+
+		backgroundFixedRows: canvas.NewRectangle(headerBorderLightColor),
+		backgroundRows:      canvas.NewRectangle(headerBorderLightColor),
+		backgroundFixedCols: canvas.NewRectangle(headerBorderLightColor),
+		backgroundCols:      canvas.NewRectangle(headerBorderLightColor),
+		edgeFixedRows:       canvas.NewLine(headerBorderDarkColor),
+		edgeRows:            canvas.NewLine(headerBorderDarkColor),
+		edgeFixedCols:       canvas.NewLine(headerBorderDarkColor),
+		edgeCols:            canvas.NewLine(headerBorderDarkColor),
+
+		hdrItemsRows: HDRItems{
+			Slots: make([]HDRSlot, 0, estimatedCapacity),
+			Index: make(map[int]int),
+		},
+		hdrItemsCols: HDRItems{
+			Slots: make([]HDRSlot, 0, estimatedCapacity),
+			Index: make(map[int]int),
+		},
+		hdrLabelColY: heightCol,
+		hdrLabelRowY: heightRow,
 	}
 }
 
-func (cyl *HeaderRecycler) Get() (*HeaderCarcuss, bool) {
-	cyl.mu.Lock()
-	if len(cyl.items) > 0 {
-
-		last := len(cyl.items) - 1
-		c := cyl.items[last]
-		cyl.items[last] = nil
-		cyl.items = cyl.items[:last]
-
-		cyl.mu.Unlock()
-		return c, true
+func (hr *HeaderRenderer) setWaterMark(t HDRType) {
+	if t == COLUMN {
+		hr.fyneMountedCountCols = len(hr.hdrItemsCols.Slots)
+		return
 	}
-	cyl.mu.Unlock()
-
-	bg := canvas.NewRectangle(headerBackgroundColor)
-	text := canvas.NewText("", color.Black)
-	text.TextSize = 11
-	text.Alignment = fyne.TextAlignCenter
-	rightBorder := canvas.NewLine(headerBorderLightColor)
-	bottomBorder := canvas.NewLine(headerBorderDarkColor)
-	wrapper := container.NewWithoutLayout(bg, text, rightBorder, bottomBorder)
-
-	return &HeaderCarcuss{
-		Container:    wrapper,
-		Background:   bg,
-		Label:        text,
-		RightBorder:  rightBorder,
-		BottomBorder: bottomBorder,
-	}, false
-
-}
-func (cyl *HeaderRecycler) Put(obj *HeaderCarcuss) {
-	cyl.mu.Lock()
-	cyl.items = append(cyl.items, obj)
-	cyl.mu.Unlock()
+	hr.fyneMountedCountRows = len(hr.hdrItemsRows.Slots)
 }
 
-func (hr *HeaderRenderer) renderColumnHeaders(colHdrContainer *fyne.Container) {
+func (hr *HeaderRenderer) mountHeaderBasics(
+	colHdr, colHdrFrozen, rowHdr, rowHdrFrozen *fyne.Container,
+) {
+	cm := hr.ctx.CoordManager
+
+	// Scrollable col + row header backgrounds are always required
+	colHdr.Add(hr.backgroundCols)
+	colHdr.Add(hr.edgeCols)
+	rowHdr.Add(hr.backgroundRows)
+	rowHdr.Add(hr.edgeRows)
+
+	// Frozen column header strip — only mounted when columns are frozen
+	if cm.HasFrozenColumns() {
+		colHdrFrozen.Add(hr.backgroundFixedCols)
+		colHdrFrozen.Add(hr.edgeFixedCols)
+	}
+
+	// Frozen row header strip — only mounted when rows are frozen
+	if cm.HasFrozenRows() {
+		rowHdrFrozen.Add(hr.backgroundFixedRows)
+		rowHdrFrozen.Add(hr.edgeFixedRows)
+	}
+}
+
+func (hr *HeaderRenderer) allocateHeaderSlots(t HDRType) {
+	items, _ := hr.hdrItems(t)
+
 	ctx := hr.ctx
-	cm := ctx.CoordManager
-	new := ctx.Viewports[RegionMain]
-	old := ctx.LastViewports[RegionMain]
-	//old := ctx.SnapshotViewports[RegionMain]
-
-	for colVisIdx := old.FirstColVisIdx; colVisIdx <= old.LastColVisIdx; colVisIdx++ {
-		if colVisIdx < new.FirstColVisIdx || colVisIdx > new.LastColVisIdx {
-			colModIdx := cm.GetColModIdxFromVisIdx(colVisIdx)
-			hr.removeHeaderItem(hr.recyclerColumns, hr.colHeadersScroll, colModIdx)
-		}
-	}
-
-	for colVisIdx := new.FirstColVisIdx; colVisIdx <= new.LastColVisIdx; colVisIdx++ {
-		if colVisIdx < old.FirstColVisIdx || colVisIdx > old.LastColVisIdx {
-			colModIdx := cm.GetColModIdxFromVisIdx(colVisIdx)
-			hr.createColumnHeaderItem(colHdrContainer, hr.colHeadersScroll, colModIdx)
-		}
-	}
-
-	for id, header := range hr.colHeadersScroll {
-		x := cm.GetColPixelPosX(RegionFrozenRows, id)
-		header.Container.Move(fyne.NewPos(x, 0))
-	}
-}
-func (hr *HeaderRenderer) renderFullColumnHeaders(colHdrContainer *fyne.Container) {
-	ctx := hr.ctx
-	cm := ctx.CoordManager
 	vp := ctx.Viewports[RegionMain]
 
-	for colVisIdx := vp.FirstColVisIdx; colVisIdx <= vp.LastColVisIdx; colVisIdx++ {
-		colModIdx := cm.GetColModIdxFromVisIdx(colVisIdx)
-		hr.createColumnHeaderItem(colHdrContainer, hr.colHeadersScroll, colModIdx)
+	var firstIdx, lastIdx int
+
+	if t == COLUMN {
+		firstIdx = vp.FirstColVisIdx
+		lastIdx = vp.LastColVisIdx
+	} else {
+		firstIdx = vp.FirstRowVisIdx
+		lastIdx = vp.LastRowVisIdx
 	}
 
-	for id, header := range hr.colHeadersScroll {
-		x := cm.GetColPixelPosX(RegionFrozenRows, id)
-		header.Container.Move(fyne.NewPos(x, 0))
+	for visIdx := firstIdx; visIdx <= lastIdx; visIdx++ {
+		items.Slots = append(items.Slots, HDRSlot{})
+		items.Index[visIdx] = len(items.Slots) - 1
 	}
 }
-func (hr *HeaderRenderer) renderRowHeaders(rowHdrContainer *fyne.Container) {
+
+func (hr *HeaderRenderer) recycleHeadersSlots(t HDRType) {
+	items, _ := hr.hdrItems(t)
+
 	ctx := hr.ctx
-	cm := ctx.CoordManager
-	new := ctx.Viewports[RegionMain]
-	old := ctx.LastViewports[RegionMain]
+	newVP := ctx.Viewports[RegionMain]
+	oldVP := ctx.LastViewports[RegionMain]
 
-	for rowVisIdx := old.FirstRowVisIdx; rowVisIdx <= old.LastRowVisIdx; rowVisIdx++ {
-		if rowVisIdx < new.FirstRowVisIdx || rowVisIdx > new.LastRowVisIdx {
-			rowModIdx := cm.GetRowModIdxFromVisIdx(rowVisIdx)
-			hr.removeHeaderItem(hr.recyclerRows, hr.rowHeadersScroll, rowModIdx)
-		}
+	var oldFirstIdx, oldLastIdx, newFirstIdx, newLastIdx int
+
+	if t == COLUMN {
+		oldFirstIdx = oldVP.FirstColVisIdx
+		oldLastIdx = oldVP.LastColVisIdx
+		newFirstIdx = newVP.FirstColVisIdx
+		newLastIdx = newVP.LastColVisIdx
+	} else {
+		oldFirstIdx = oldVP.FirstRowVisIdx
+		oldLastIdx = oldVP.LastRowVisIdx
+		newFirstIdx = newVP.FirstRowVisIdx
+		newLastIdx = newVP.LastRowVisIdx
 	}
 
-	for rowVisIdx := new.FirstRowVisIdx; rowVisIdx <= new.LastRowVisIdx; rowVisIdx++ {
-		if rowVisIdx < old.FirstRowVisIdx || rowVisIdx > old.LastRowVisIdx {
-			rowModIdx := cm.GetRowModIdxFromVisIdx(rowVisIdx)
-			hr.createRowHeaderItem(rowHdrContainer, hr.rowHeadersScroll, rowModIdx)
-		}
+	// Stash only the delta ranges that have scrolled out of view.
+	// The stable overlap region is not iterated.
+
+	// Left stash: old entries now to the left/above the new viewport
+	for visIdx := oldFirstIdx; visIdx < newFirstIdx && visIdx <= oldLastIdx; visIdx++ {
+		idx := items.Index[visIdx]
+		delete(items.Index, visIdx)
+		items.hotPool = append(items.hotPool, idx)
 	}
 
-	for id, header := range hr.rowHeadersScroll {
-		y := cm.GetRowPixelPosY(RegionFrozenCols, id)
-		header.Container.Move(fyne.NewPos(0, y))
+	// Right stash: old entries now to the right/below the new viewport
+	for visIdx := max(oldFirstIdx, newLastIdx+1); visIdx <= oldLastIdx; visIdx++ {
+		idx := items.Index[visIdx]
+		delete(items.Index, visIdx)
+		items.hotPool = append(items.hotPool, idx)
+	}
+
+	// Assign slots only to the delta ranges that have scrolled into view.
+
+	// Left assign: new entries entering from the left/above
+	for visIdx := newFirstIdx; visIdx < oldFirstIdx && visIdx <= newLastIdx; visIdx++ {
+		hr.assignSlot(items, visIdx)
+	}
+
+	// Right assign: new entries entering from the right/below
+	for visIdx := max(newFirstIdx, oldLastIdx+1); visIdx <= newLastIdx; visIdx++ {
+		hr.assignSlot(items, visIdx)
 	}
 }
-func (hr *HeaderRenderer) renderFullRowHeaders(rowHdrContainer *fyne.Container) {
-	ctx := hr.ctx
-	cm := ctx.CoordManager
-	vp := ctx.Viewports[RegionMain]
 
-	for rowVisIdx := vp.FirstRowVisIdx; rowVisIdx <= vp.LastRowVisIdx; rowVisIdx++ {
-		rowModIdx := cm.GetRowModIdxFromVisIdx(rowVisIdx)
-		hr.createRowHeaderItem(rowHdrContainer, hr.rowHeadersScroll, rowModIdx)
-	}
-
-	for id, header := range hr.rowHeadersScroll {
-		y := cm.GetRowPixelPosY(RegionFrozenCols, id)
-		header.Container.Move(fyne.NewPos(0, y))
+// assignSlot assigns a recycled or new HDRSlot to the given visible index.
+// Pulls first from the hot stash, then the cold pool, then allocates fresh.
+func (hr *HeaderRenderer) assignSlot(items *HDRItems, visIdx int) {
+	if len(items.hotPool) > 0 {
+		id := items.hotPool[len(items.hotPool)-1]
+		items.hotPool = items.hotPool[:len(items.hotPool)-1]
+		items.Slots[id].Initialised = false
+		items.Index[visIdx] = id
+	} else if len(items.coldPool) > 0 {
+		id := items.coldPool[len(items.coldPool)-1]
+		items.coldPool = items.coldPool[:len(items.coldPool)-1]
+		items.Slots[id].Initialised = false
+		items.Index[visIdx] = id
+	} else {
+		items.Slots = append(items.Slots, HDRSlot{})
+		items.Index[visIdx] = len(items.Slots) - 1
 	}
 }
 
-func (hr *HeaderRenderer) renderFixedColumnHeaders(colHdrFixedContainer *fyne.Container) {
+func (hr *HeaderRenderer) renderFixedColumnHDRs(c *fyne.Container) {
 	ctx := hr.ctx
 	cm := ctx.CoordManager
 
 	for colVisIdx := 1; colVisIdx <= cm.GetFrozenColumns(); colVisIdx++ {
 		colModIdx := cm.GetColModIdxFromVisIdx(colVisIdx)
-		hr.createColumnHeaderItem(colHdrFixedContainer, hr.colHeadersFixed, colModIdx)
-	}
+		x := cm.GetColPixelPosEndX(RegionFixedCorner, colModIdx)
 
-	for colModIdx, header := range hr.colHeadersFixed {
-		x := cm.GetColPixelPosX(RegionFixedCorner, colModIdx)
-		header.Container.Move(fyne.NewPos(x, 0))
+		lbl, ln := newHeaderItem()
+
+		ln.Position1 = fyne.NewPos(x, HeaderHeight*0.2)
+		ln.Position2 = fyne.NewPos(x, HeaderHeight)
+		c.Add(ln)
+
+		hdrWidth := cm.GetWidthByModIdx(colModIdx)
+
+		lbl.Text = columnIndexToName(colModIdx)
+		lbl.Move(fyne.NewPos(x-hdrWidth/2, hr.hdrLabelColY))
+		c.Add(lbl)
 	}
 }
 
-func (hr *HeaderRenderer) renderFixedRowHeaders(rowHdrFixedContainer *fyne.Container) {
+func (hr *HeaderRenderer) renderFixedRowHDRs(c *fyne.Container) {
 	ctx := hr.ctx
 	cm := ctx.CoordManager
 
 	for rowVisIdx := 1; rowVisIdx <= cm.GetFrozenRows(); rowVisIdx++ {
 		rowModIdx := cm.GetRowModIdxFromVisIdx(rowVisIdx)
-		hr.createRowHeaderItem(rowHdrFixedContainer, hr.rowHeadersFixed, rowModIdx)
-	}
+		y := cm.GetRowPixelPosEndY(RegionFixedCorner, rowModIdx)
 
-	for rowModIdx, header := range hr.rowHeadersFixed {
-		y := cm.GetRowPixelPosY(RegionFixedCorner, rowModIdx)
-		header.Container.Move(fyne.NewPos(0, y))
+		lbl, ln := newHeaderItem()
+
+		ln.Position1 = fyne.NewPos(HeaderWidth*0.2, y)
+		ln.Position2 = fyne.NewPos(HeaderWidth, y)
+		c.Add(ln)
+
+		hdrHeight := cm.GetHeightByModIdx(rowModIdx)
+
+		lbl.Text = fmt.Sprintf("%d", rowModIdx+1)
+		lbl.Move(fyne.NewPos(HeaderWidth/2, y-hdrHeight/2-hr.hdrLabelRowY))
+		c.Add(lbl)
 	}
 }
+func (hr *HeaderRenderer) UpdateScrollableHeaders(
+	c *fyne.Container, t HDRType, renderAbsolute bool,
+) {
+	items, _ := hr.hdrItems(t)
 
-func (hr *HeaderRenderer) createColumnHeaderItem(content *fyne.Container, headerMap map[int]*HeaderCarcuss, colModIdx int) {
-	if _, exists := headerMap[colModIdx]; exists {
-		return
-	}
-	ctx := hr.ctx
-	cm := ctx.CoordManager
-
-	width := cm.GetWidthByModIdx(colModIdx)
-
-	recycler := hr.recyclerColumns
-	header, recycled := recycler.Get()
-
-	header.setSize(width, HeaderHeight)
-	header.Label.Text = columnIndexToName(colModIdx)
-	header.Label.TextSize = 11
-	labelHeight := header.Label.MinSize().Height
-	header.Label.Move(fyne.NewPos(width/2, (HeaderHeight-labelHeight)/2))
-
-	if !recycled {
-		content.Add(header.Container)
+	hr.setWaterMark(t)
+	if len(items.Index) == 0 {
+		hr.allocateHeaderSlots(t)
 	} else {
-		header.Container.Show()
+		hr.recycleHeadersSlots(t)
 	}
+	hr.fyneAddContent(c, t)
 
-	headerMap[colModIdx] = header
-}
-
-func (hr *HeaderRenderer) createRowHeaderItem(content *fyne.Container, headerMap map[int]*HeaderCarcuss, rowModIdx int) {
-	if _, exists := headerMap[rowModIdx]; exists {
-		return
-	}
-	ctx := hr.ctx
-	cm := ctx.CoordManager
-
-	height := cm.GetHeightByModIdx(rowModIdx)
-
-	recycler := hr.recyclerRows
-	header, recycled := recycler.Get()
-
-	header.setSize(HeaderWidth, height)
-	header.Label.Text = fmt.Sprintf("%d", rowModIdx+1)
-	header.Label.TextSize = 11
-	labelHeight := header.Label.MinSize().Height
-	header.Label.Move(fyne.NewPos(HeaderWidth/2, (height-labelHeight)/2))
-
-	if !recycled {
-		content.Add(header.Container)
+	if t == COLUMN {
+		hr.fynePositionColumnHeaders(renderAbsolute)
 	} else {
-		header.Container.Show()
+		hr.fynePositionRowHeaders(renderAbsolute)
 	}
-
-	headerMap[rowModIdx] = header
+	hr.fyneMoveStashedItems(items)
 }
 
-func (r *HeaderRenderer) removeHeaderItem(recycler *HeaderRecycler, cellMap map[int]*HeaderCarcuss, modIdx int) {
-	if cell, exists := cellMap[modIdx]; exists {
+func (hr *HeaderRenderer) fyneAddContent(c *fyne.Container, t HDRType) {
+	items, from := hr.hdrItems(t)
 
-		cell.Container.Hide()
+	for i := from; i < len(items.Slots); i++ {
+		lbl, ln := newHeaderItem()
 
-		recycler.Put(cell)
+		items.Slots[i].Label = lbl
+		items.Slots[i].Line = ln
 
-		delete(cellMap, modIdx)
+		c.Add(lbl)
+		c.Add(ln)
 	}
 }
 
-func (h *HeaderCarcuss) setSize(width, height float32) {
-	h.Background.Resize(fyne.NewSize(width, height))
+func newHeaderItem() (*canvas.Text, *canvas.Line) {
+	lbl := canvas.NewText("", color.Black)
+	lbl.TextSize = headerFontSize
+	lbl.Alignment = fyne.TextAlignCenter
+	ln := canvas.NewLine(headerBorderDarkColor)
+	return lbl, ln
+}
 
-	h.RightBorder.Position1 = fyne.NewPos(width, 0)
-	h.RightBorder.Position2 = fyne.NewPos(width, height)
+func (hr *HeaderRenderer) fynePositionColumnHeaders(renderAbsolute bool) {
+	cm := hr.ctx.CoordManager
 
-	h.BottomBorder.Position1 = fyne.NewPos(0, height)
-	h.BottomBorder.Position2 = fyne.NewPos(width, height)
+	dx := cm.GetScrollDeltaX()
 
-	h.Container.Resize(fyne.NewSize(width, height))
+	for visIdx, slotIdx := range hr.hdrItemsCols.Index {
+		slot := &hr.hdrItemsCols.Slots[slotIdx]
+		lbl := slot.Label
+		line := slot.Line
+
+		colModIdx := cm.GetColModIdxFromVisIdx(visIdx)
+
+		isNew := !slot.Initialised
+		if isNew {
+			lbl.Text = columnIndexToName(colModIdx)
+			slot.Initialised = true
+		}
+
+		if isNew || renderAbsolute {
+			w := cm.GetWidthByModIdx(colModIdx)
+			x := cm.GetColPixelPosEndX(RegionFrozenRows, colModIdx)
+			lbl.Move(fyne.NewPos(x-w/2, hr.hdrLabelColY))
+			line.Position1 = fyne.NewPos(x-w, HeaderHeight*0.2)
+			line.Position2 = fyne.NewPos(x-w, HeaderHeight)
+		} else {
+			pos := lbl.Position()
+			lbl.Move(fyne.NewPos(pos.X-dx, pos.Y))
+			line.Position1.X -= dx
+			line.Position2.X -= dx
+		}
+	}
+}
+func (hr *HeaderRenderer) fynePositionRowHeaders(renderAbsolute bool) {
+	cm := hr.ctx.CoordManager
+
+	dy := cm.GetScrollDeltaY()
+
+	for visIdx, slotIdx := range hr.hdrItemsRows.Index {
+		slot := &hr.hdrItemsRows.Slots[slotIdx]
+		lbl := slot.Label
+		line := slot.Line
+
+		rowModIdx := cm.GetRowModIdxFromVisIdx(visIdx)
+
+		isNew := !slot.Initialised
+		if isNew {
+			lbl.Text = fmt.Sprintf("%d", rowModIdx+1)
+			slot.Initialised = true
+		}
+
+		if isNew || renderAbsolute {
+			h := cm.GetHeightByModIdx(rowModIdx)
+			y := cm.GetRowPixelPosY(RegionFrozenCols, rowModIdx)
+			lbl.Move(fyne.NewPos(HeaderWidth/2, y+h/2-hr.hdrLabelRowY))
+
+			line.Position1 = fyne.NewPos(HeaderWidth*0.2, y+h)
+			line.Position2 = fyne.NewPos(HeaderWidth, y+h)
+		} else {
+			pos := lbl.Position()
+			lbl.Move(fyne.NewPos(pos.X, pos.Y-dy))
+			line.Position1.Y -= dy
+			line.Position2.Y -= dy
+		}
+	}
+}
+
+func (hr *HeaderRenderer) fyneMoveStashedItems(items *HDRItems) {
+	for _, id := range items.hotPool {
+		items.Slots[id].Label.Move(fyne.NewPos(offscreenCoord, offscreenCoord))
+		items.Slots[id].Line.Position1 = fyne.NewPos(offscreenCoord, offscreenCoord)
+		items.Slots[id].Line.Position2 = fyne.NewPos(offscreenCoord, offscreenCoord)
+		items.coldPool = append(items.coldPool, id)
+	}
+	items.hotPool = items.hotPool[:0]
 }
 
 func columnIndexToName(col int) string {
@@ -300,19 +391,22 @@ func columnIndexToName(col int) string {
 	return name
 }
 
-func (r *HeaderRenderer) RenderCorner(cnrHdrContainer *fyne.Container) {
-	bg := canvas.NewRectangle(headerBackgroundColor)
+func (hr *HeaderRenderer) renderCornerHDR(c *fyne.Container) {
+	bg := canvas.NewRectangle(headerBorderLightColor)
 	bg.Resize(fyne.NewSize(HeaderWidth, HeaderHeight))
 	bg.Move(fyne.NewPos(0, 0))
 
-	bottomBorder := canvas.NewLine(headerBorderColor)
+	c.Add(bg)
+
+	bottomBorder := canvas.NewLine(headerBorderDarkColor)
 	bottomBorder.Position1 = fyne.NewPos(0, HeaderHeight)
 	bottomBorder.Position2 = fyne.NewPos(HeaderWidth, HeaderHeight)
 
-	rightBorder := canvas.NewLine(headerBorderColor)
+	c.Add(bottomBorder)
+
+	rightBorder := canvas.NewLine(headerBorderDarkColor)
 	rightBorder.Position1 = fyne.NewPos(HeaderWidth, 0)
 	rightBorder.Position2 = fyne.NewPos(HeaderWidth, HeaderHeight)
 
-	cnrHdrContainer.Objects = []fyne.CanvasObject{bg, bottomBorder, rightBorder}
-	cnrHdrContainer.Refresh()
+	c.Add(rightBorder)
 }

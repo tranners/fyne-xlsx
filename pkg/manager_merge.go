@@ -205,16 +205,9 @@ func (mm *MergeManager) buildMergeLookup(mergeCells []MergeRange) {
 		visibleAnchorModCol := cm.GetColModIdxFromVisIdx(startVisCol)
 		visibleAnchor := CellID{Row: visibleAnchorModRow, Col: visibleAnchorModCol}
 
-		//for row := startModRow; row <= endModRow; row++ {
-		//	for col := startModCol; col <= endModCol; col++ {
-		//		mm.cellToMergeAnchor[CellID{Row: row, Col: col}] = visibleAnchor // Changed!
-		//	}
-		//}
-
 		// merged range Size()
 		// key merged range anchor cell
 		mm.mergedeSizeByVisAnchor[visibleAnchor] = fyne.NewSize(width, height)
-		//mm.mergedeSizeByModAnchor[anchor] = fyne.NewSize(width, height)
 
 		mergeVisInfo := VisIdxMergeInfo{
 			VisRowStart: startVisRow,
@@ -326,8 +319,8 @@ func (mm *MergeManager) isCellInMergedRange(cellModID CellID) bool {
 }
 
 func (mm *MergeManager) hasMergeRangeBackgroundByVisAnchorId(visAnchorId CellID) bool {
-	if _, exists := mm.anchorHasBackgroundByVisAnchor[visAnchorId]; exists {
-		return true
+	if hasBackground, exists := mm.anchorHasBackgroundByVisAnchor[visAnchorId]; exists {
+		return hasBackground
 	}
 	return false
 }

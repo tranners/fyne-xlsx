@@ -14,18 +14,18 @@ const (
 	Vertical
 )
 
-var borderGridlineColor = color.NRGBA{R: 212, G: 212, B: 212, A: 225}
+var borderGridlineColor = color.NRGBA{R: 212, G: 212, B: 212, A: 215} // slightly non-opaque alpha
 
-type SegmentRequiredFn func(primaryVisIdx, secondaryVisIdx int, region GridRegion) bool
+type GLSegmentRequiredFn func(primaryVisIdx, secondaryVisIdx int, region GridRegion) bool
 
-type Edge struct {
-	Startmost int // index in LineConfig of left-most segment in this row, or -1
-	Endmost   int // index in LineConfig of right-most segment in this row, or -1
+type GLEdge struct {
+	Startmost int // index in LineConfig of start-most segment in this row or col, or -1
+	Endmost   int // index in LineConfig of end-most segment in this row or col, or -1
 }
 
-type Edges map[int]Edge // key = logical row boundary index (usually row number or row+1)
+type GLEdges map[int]GLEdge // key = logical row boundary index (usually row number or row+1)
 
-type SegmentConfig struct {
+type GLSegmentConfig struct {
 	PrimaryAxis    int // row index for horizontal; col index for vertical
 	SecondaryStart int // col start for horizontal; row start for vertical
 	SecondaryEnd   int // col end for horizontal; row end for vertical
@@ -34,40 +34,45 @@ type SegmentConfig struct {
 	UnPositioned   bool
 }
 
-type LineItems struct {
+type GLLineItems struct {
 	Lines       []*canvas.Line // parallel to LineConfig — recycle these objects
-	LinesConfig []SegmentConfig
-	Edges       Edges
+	LinesConfig []GLSegmentConfig
+	Edges       GLEdges
 }
 
-func NewLineItems() *LineItems {
-	return &LineItems{
+func NewLineItems() *GLLineItems {
+	return &GLLineItems{
 		Lines:       []*canvas.Line{},
-		LinesConfig: []SegmentConfig{},
-		Edges:       make(map[int]Edge),
+		LinesConfig: []GLSegmentConfig{},
+		Edges:       make(map[int]GLEdge),
 	}
 }
 
-type RecycleManager struct {
-	Flagger  *GridlineFlagger
-	Recycler *GridlineRecycler
+type GLRecycleManager struct {
+	HotPool  *GLHotPool
+	ColdPool *GLColdPool
 }
 
-type GridlineFlagger struct {
+type GLHotPool struct {
+	items []int
+}
+
+type GLColdPool struct {
 	items []int
 }
 
 type GridLineRenderer struct {
 	ctx *RenderContext
 
-	LineItems map[GridRegion]map[LineOrientation]*LineItems
-	Managers  map[GridRegion]map[LineOrientation]*RecycleManager
+	LineItems        map[GridRegion]map[LineOrientation]*GLLineItems
+	Managers         map[GridRegion]map[LineOrientation]*GLRecycleManager
+	PendingPositions map[GridRegion]map[LineOrientation]int
 }
 
 func NewGridLineRenderer(ctx *RenderContext) *GridLineRenderer {
 	return &GridLineRenderer{
 		ctx: ctx,
-		LineItems: map[GridRegion]map[LineOrientation]*LineItems{
+		LineItems: map[GridRegion]map[LineOrientation]*GLLineItems{
 			RegionMain: {
 				Horizontal: NewLineItems(),
 				Vertical:   NewLineItems(),
@@ -85,7 +90,7 @@ func NewGridLineRenderer(ctx *RenderContext) *GridLineRenderer {
 				Vertical:   NewLineItems(),
 			},
 		},
-		Managers: map[GridRegion]map[LineOrientation]*RecycleManager{
+		Managers: map[GridRegion]map[LineOrientation]*GLRecycleManager{
 			RegionMain: {
 				Horizontal: NewLineManager(),
 				Vertical:   NewLineManager(),
@@ -102,11 +107,17 @@ func NewGridLineRenderer(ctx *RenderContext) *GridLineRenderer {
 				Horizontal: NewLineManager(),
 				Vertical:   NewLineManager(),
 			},
+		},
+		PendingPositions: map[GridRegion]map[LineOrientation]int{
+			RegionMain:        {Horizontal: 0, Vertical: 0},
+			RegionFixedCorner: {Horizontal: 0, Vertical: 0},
+			RegionFrozenRows:  {Horizontal: 0, Vertical: 0},
+			RegionFrozenCols:  {Horizontal: 0, Vertical: 0},
 		},
 	}
 }
 
-func (cyl *GridlineFlagger) Get() (int, bool) {
+func (cyl *GLHotPool) Get() (int, bool) {
 	if len(cyl.items) > 0 {
 		last := len(cyl.items) - 1
 		c := cyl.items[last]
@@ -116,74 +127,65 @@ func (cyl *GridlineFlagger) Get() (int, bool) {
 	return -1, false
 }
 
-func (pf *GridlineFlagger) Put(id int) {
+func (pf *GLHotPool) Put(id int) {
 	pf.items = append(pf.items, id)
 }
 
-func (pf *GridlineFlagger) Reset() {
+func (pf *GLHotPool) Reset() {
 	pf.items = pf.items[:0]
 }
 
-type GridlineRecycler struct {
-	items []GridlineRecyclerItem
-}
-
-type GridlineRecyclerItem struct {
-	id  int
-	obj *canvas.Line
-}
-
-func (cyl *GridlineRecycler) Get() (GridlineRecyclerItem, bool) {
+func (cyl *GLColdPool) Get() (int, bool) {
 	if len(cyl.items) > 0 {
 		last := len(cyl.items) - 1
 		c := cyl.items[last]
 		cyl.items = cyl.items[:last]
 		return c, true
 	}
-	obj := canvas.NewLine(borderGridlineColor)
-	return GridlineRecyclerItem{id: -1, obj: obj}, false
+	return -1, false
 }
 
-func (cyl *GridlineRecycler) Put(id int) {
-	item := GridlineRecyclerItem{id: id}
-	cyl.items = append(cyl.items, item)
+func (cyl *GLColdPool) Put(id int) {
+	cyl.items = append(cyl.items, id)
 }
 
-func (cyl *GridlineRecycler) Size() int {
-
+func (cyl *GLColdPool) Size() int {
 	return len(cyl.items)
 }
 
-func NewLineManager() *RecycleManager {
-	return &RecycleManager{
-		Flagger:  NewGridlineFlagger(),
-		Recycler: NewGridlineRecycler(),
+func NewLineManager() *GLRecycleManager {
+	return &GLRecycleManager{
+		HotPool:  NewGridlineHotPool(),
+		ColdPool: NewGridlineColdPool(),
 	}
 }
 
-func NewGridlineRecycler() *GridlineRecycler {
-	return &GridlineRecycler{
-		items: []GridlineRecyclerItem{},
-	}
-}
-
-func NewGridlineFlagger() *GridlineFlagger {
-	return &GridlineFlagger{
+func NewGridlineColdPool() *GLColdPool {
+	return &GLColdPool{
 		items: []int{},
 	}
 }
 
-func (gl *GridLineRenderer) stashFlaggedItems(region GridRegion, orientation LineOrientation) {
+func NewGridlineHotPool() *GLHotPool {
+	return &GLHotPool{
+		items: []int{},
+	}
+}
+
+func (gl *GridLineRenderer) SetWaterMark(region GridRegion, orientation LineOrientation) {
+	gl.PendingPositions[region][orientation] = len(gl.LineItems[region][orientation].Lines)
+}
+func (gl *GridLineRenderer) fyneMoveHotPoolItems(region GridRegion, orientation LineOrientation) {
 	managers := gl.Managers
-	flagger := managers[region][orientation].Flagger
-	recycler := managers[region][orientation].Recycler
+	hotPool := managers[region][orientation].HotPool
+	coldPool := managers[region][orientation].ColdPool
 
 	h := gl.LineItems[region][orientation]
 
-	for _, itemId := range flagger.items {
-		recycler.Put(itemId)
+	for _, itemId := range hotPool.items {
+		coldPool.Put(itemId)
 
-		h.LinesConfig[itemId] = SegmentConfig{
+		h.LinesConfig[itemId] = GLSegmentConfig{
 			PrimaryAxis:    -1,
 			SecondaryStart: -1,
 			SecondaryEnd:   -1,
@@ -191,25 +193,23 @@ func (gl *GridLineRenderer) stashFlaggedItems(region GridRegion, orientation Lin
 			NextLineId:     -1,
 			UnPositioned:   false,
 		}
-	}
-}
-
-func (gl *GridLineRenderer) fyneMoveStashedItems(region GridRegion, orientation LineOrientation) {
-	flagger := gl.Managers[region][orientation].Flagger
-
-	h := gl.LineItems[region][orientation]
-
-	for _, itemId := range flagger.items {
 		obj := h.Lines[itemId]
 		obj.Move(fyne.NewPos(-9999, -9999))
-
 	}
-	// empty it
-	flagger.Reset()
+	hotPool.Reset()
+}
+
+func (gl *GridLineRenderer) fyneAddContent(c *fyne.Container, region GridRegion, o LineOrientation) {
+	from := gl.PendingPositions[region][o]
+	lines := gl.LineItems[region][o].Lines
+	for i := from; i < len(lines); i++ {
+		lines[i] = canvas.NewLine(borderGridlineColor)
+		c.Add(lines[i])
+	}
 }
 
 func (gl *GridLineRenderer) Remove(primaryVisIdx int, region GridRegion, orientation LineOrientation) {
-	flagger := gl.Managers[region][orientation].Flagger
+	hotPool := gl.Managers[region][orientation].HotPool
 
 	h := gl.LineItems[region][orientation]
 	edge, ok := h.Edges[primaryVisIdx]
@@ -224,19 +224,17 @@ func (gl *GridLineRenderer) Remove(primaryVisIdx int, region GridRegion, orienta
 		h.LinesConfig[currIdx].NextLineId = -1
 		h.LinesConfig[currIdx].PrevLineId = -1
 
-		flagger.Put(currIdx)
+		hotPool.Put(currIdx)
 		currIdx = nextIdx
 	}
-
-	// zap the row edges
 	delete(h.Edges, primaryVisIdx)
 }
 
-func (gl *GridLineRenderer) Add(container *fyne.Container, primaryVisIdx int, secondaryVisIdxMin, secondaryVisIdxMax int, region GridRegion, orientation LineOrientation) {
+func (gl *GridLineRenderer) Add(primaryVisIdx int, secondaryVisIdxMin, secondaryVisIdxMax int, region GridRegion, orientation LineOrientation) {
 	var fn func(int, int, GridRegion) bool
 
-	flagger := gl.Managers[region][orientation].Flagger
-	recycler := gl.Managers[region][orientation].Recycler
+	hotPool := gl.Managers[region][orientation].HotPool
+	coldPool := gl.Managers[region][orientation].ColdPool
 
 	h := gl.LineItems[region][orientation]
 
@@ -263,7 +261,7 @@ func (gl *GridLineRenderer) Add(container *fyne.Container, primaryVisIdx int, se
 
 	for _, ns := range segments {
 		var idx int
-		if flaggedItemId, exist := flagger.Get(); exist {
+		if flaggedItemId, exist := hotPool.Get(); exist {
 			seg := &h.LinesConfig[flaggedItemId]
 			seg.PrimaryAxis = primaryVisIdx
 			seg.SecondaryStart = ns.Start
@@ -273,10 +271,10 @@ func (gl *GridLineRenderer) Add(container *fyne.Container, primaryVisIdx int, se
 			seg.UnPositioned = true
 			idx = flaggedItemId
 		} else {
-			primitiveGridLineRecyleItem, recycledItem := recycler.Get()
+			primitiveGridLineRecyleItemId, recycledItem := coldPool.Get()
 
 			if recycledItem {
-				seg := &h.LinesConfig[primitiveGridLineRecyleItem.id]
+				seg := &h.LinesConfig[primitiveGridLineRecyleItemId]
 				seg.PrimaryAxis = primaryVisIdx
 				seg.SecondaryStart = ns.Start
 				seg.SecondaryEnd = ns.End
@@ -284,9 +282,9 @@ func (gl *GridLineRenderer) Add(container *fyne.Container, primaryVisIdx int, se
 				seg.NextLineId = -1
 				seg.UnPositioned = true
 
-				idx = primitiveGridLineRecyleItem.id
+				idx = primitiveGridLineRecyleItemId
 			} else {
-				seg := SegmentConfig{
+				seg := GLSegmentConfig{
 					PrimaryAxis:    primaryVisIdx,
 					SecondaryStart: ns.Start,
 					SecondaryEnd:   ns.End,
@@ -295,12 +293,10 @@ func (gl *GridLineRenderer) Add(container *fyne.Container, primaryVisIdx int, se
 					UnPositioned:   true,
 				}
 
-				h.Lines = append(h.Lines, primitiveGridLineRecyleItem.obj)
+				h.Lines = append(h.Lines, nil)
 				h.LinesConfig = append(h.LinesConfig, seg)
 
 				idx = len(h.Lines) - 1
-
-				container.Add(primitiveGridLineRecyleItem.obj)
 			}
 		}
 
@@ -316,27 +312,27 @@ func (gl *GridLineRenderer) Add(container *fyne.Container, primaryVisIdx int, se
 		prevIdx = idx
 
 	}
-	h.Edges[primaryVisIdx] = Edge{Startmost: leftmost, Endmost: rightmost}
+	h.Edges[primaryVisIdx] = GLEdge{Startmost: leftmost, Endmost: rightmost}
 }
 
-func (gl *GridLineRenderer) getSegments(rowVisIdx, colVisIdxMin, colVisIdxMax int, region GridRegion, fn SegmentRequiredFn) []struct{ Start, End int } {
+func (gl *GridLineRenderer) getSegments(primaryVisIdx, secondaryVisIdxMin, secondaryVisIdxMax int, region GridRegion, fn GLSegmentRequiredFn) []struct{ Start, End int } {
 	var segments []struct{ Start, End int }
 	var currStart int = -1
-	for colVisIdx := colVisIdxMin; colVisIdx <= colVisIdxMax; colVisIdx++ {
-		drawn := fn(rowVisIdx, colVisIdx, region)
+	for visIdx := secondaryVisIdxMin; visIdx <= secondaryVisIdxMax; visIdx++ {
+		drawn := fn(primaryVisIdx, visIdx, region)
 		if drawn {
 			if currStart == -1 {
-				currStart = colVisIdx
+				currStart = visIdx
 			}
 		} else {
 			if currStart != -1 {
-				segments = append(segments, struct{ Start, End int }{currStart, colVisIdx - 1}) // End is exclusive.
+				segments = append(segments, struct{ Start, End int }{currStart, visIdx - 1}) // End is exclusive.
 				currStart = -1
 			}
 		}
 	}
 	if currStart != -1 {
-		segments = append(segments, struct{ Start, End int }{currStart, colVisIdxMax})
+		segments = append(segments, struct{ Start, End int }{currStart, secondaryVisIdxMax})
 	}
 	return segments
 }
@@ -346,7 +342,7 @@ func (gl *GridLineRenderer) TrimStart(
 	secondaryVisIdxMin int,
 	region GridRegion,
 	orientation LineOrientation) {
-	flagger := gl.Managers[region][orientation].Flagger
+	hotPool := gl.Managers[region][orientation].HotPool
 
 	h := gl.LineItems[region][orientation]
 	edge, ok := h.Edges[primaryVisIdx]
@@ -358,7 +354,9 @@ func (gl *GridLineRenderer) TrimStart(
 	for currIdx != -1 {
 		seg := &h.LinesConfig[currIdx]
 		if seg.SecondaryEnd < secondaryVisIdxMin {
-			flagger.Put(currIdx)
+			h.LinesConfig[currIdx].NextLineId = -1
+			h.LinesConfig[currIdx].PrevLineId = -1
+			hotPool.Put(currIdx)
 
 			edge.Startmost = seg.NextLineId // Update.
 			if edge.Startmost == -1 {
@@ -388,7 +386,7 @@ func (gl *GridLineRenderer) TrimEnd(
 	region GridRegion,
 	orientation LineOrientation,
 ) {
-	flagger := gl.Managers[region][orientation].Flagger
+	hotPool := gl.Managers[region][orientation].HotPool
 
 	h := gl.LineItems[region][orientation]
 	edge, ok := h.Edges[primaryVisIdx]
@@ -401,7 +399,9 @@ func (gl *GridLineRenderer) TrimEnd(
 	for currIdx != -1 {
 		seg := &h.LinesConfig[currIdx]
 		if seg.SecondaryStart > secondaryVisIdxMax {
-			flagger.Put(currIdx)
+			h.LinesConfig[currIdx].NextLineId = -1
+			h.LinesConfig[currIdx].PrevLineId = -1
+			hotPool.Put(currIdx)
 
 			// Update rightmost to the previous segment
 			edge.Endmost = seg.PrevLineId
@@ -430,15 +430,14 @@ func (gl *GridLineRenderer) TrimEnd(
 }
 
 func (gl *GridLineRenderer) GrowStart(
-	container *fyne.Container,
 	primaryVisIdx int,
-	newSecondayVisIdxMin int, // the new, smaller min column (inclusive)
+	newSecondayVisIdxMin int,
 	region GridRegion,
 	orientation LineOrientation,
 ) {
 	var fn func(int, int, GridRegion) bool
-	flagger := gl.Managers[region][orientation].Flagger
-	recycler := gl.Managers[region][orientation].Recycler
+	hotPool := gl.Managers[region][orientation].HotPool
+	coldPool := gl.Managers[region][orientation].ColdPool
 
 	h := gl.LineItems[region][orientation]
 
@@ -462,7 +461,6 @@ func (gl *GridLineRenderer) GrowStart(
 
 	n := len(segments)
 
-	var newIdx int = -1
 	for i := n - 1; i >= 0; i-- {
 		segment := segments[i]
 		if segment.End+1 == h.LinesConfig[currLeftIdx].SecondaryStart {
@@ -471,7 +469,7 @@ func (gl *GridLineRenderer) GrowStart(
 			h.LinesConfig[currLeftIdx].UnPositioned = true
 		} else {
 			// create new segment
-			if flaggedItemId, exist := flagger.Get(); exist {
+			if flaggedItemId, exist := hotPool.Get(); exist {
 				// hot
 				h.LinesConfig[edge.Startmost].PrevLineId = flaggedItemId
 
@@ -486,11 +484,11 @@ func (gl *GridLineRenderer) GrowStart(
 				edge.Startmost = flaggedItemId
 				h.Edges[primaryVisIdx] = edge
 			} else {
-				recItem, recycled := recycler.Get()
+				recItemId, recycled := coldPool.Get()
 				if recycled {
-					h.LinesConfig[edge.Startmost].PrevLineId = recItem.id
+					h.LinesConfig[edge.Startmost].PrevLineId = recItemId
 
-					seg := &h.LinesConfig[recItem.id]
+					seg := &h.LinesConfig[recItemId]
 					seg.PrimaryAxis = primaryVisIdx
 					seg.SecondaryStart = segment.Start
 					seg.SecondaryEnd = segment.End
@@ -498,15 +496,14 @@ func (gl *GridLineRenderer) GrowStart(
 					seg.NextLineId = edge.Startmost
 					seg.UnPositioned = true
 
-					edge.Startmost = recItem.id
+					edge.Startmost = recItemId
 					h.Edges[primaryVisIdx] = edge
 				} else {
-					h.Lines = append(h.Lines, recItem.obj)
-					newIdx = len(h.Lines) - 1
 
-					h.LinesConfig[edge.Startmost].PrevLineId = newIdx
+					h.Lines = append(h.Lines, nil)
+					h.LinesConfig[edge.Startmost].PrevLineId = len(h.Lines) - 1
 
-					seg := SegmentConfig{
+					seg := GLSegmentConfig{
 						PrimaryAxis:    primaryVisIdx,
 						SecondaryStart: segment.Start,
 						SecondaryEnd:   segment.End,
@@ -517,10 +514,8 @@ func (gl *GridLineRenderer) GrowStart(
 
 					h.LinesConfig = append(h.LinesConfig, seg)
 
-					edge.Startmost = newIdx
+					edge.Startmost = len(h.Lines) - 1
 					h.Edges[primaryVisIdx] = edge
-
-					container.Add(recItem.obj)
 				}
 			}
 		}
@@ -528,15 +523,14 @@ func (gl *GridLineRenderer) GrowStart(
 }
 
 func (gl *GridLineRenderer) GrowEnd(
-	container *fyne.Container,
 	primaryVisIdx int,
 	newSecondaryVisIdxMax int, // the new, larger max column (inclusive)
 	region GridRegion,
 	orientation LineOrientation,
 ) {
 	var fn func(int, int, GridRegion) bool
-	flagger := gl.Managers[region][orientation].Flagger
-	recycler := gl.Managers[region][orientation].Recycler
+	hotPool := gl.Managers[region][orientation].HotPool
+	coldPool := gl.Managers[region][orientation].ColdPool
 
 	h := gl.LineItems[region][orientation]
 
@@ -560,7 +554,6 @@ func (gl *GridLineRenderer) GrowEnd(
 
 	n := len(segments)
 
-	var newIdx int = -1
 	for i := 0; i < n; i++ {
 		segment := segments[i]
 		if segment.Start-1 == h.LinesConfig[currRightIdx].SecondaryEnd {
@@ -568,7 +561,7 @@ func (gl *GridLineRenderer) GrowEnd(
 			h.LinesConfig[currRightIdx].SecondaryEnd = segment.End
 			h.LinesConfig[currRightIdx].UnPositioned = true
 		} else {
-			if flaggedItemId, exist := flagger.Get(); exist {
+			if flaggedItemId, exist := hotPool.Get(); exist {
 				h.LinesConfig[edge.Endmost].NextLineId = flaggedItemId
 
 				seg := &h.LinesConfig[flaggedItemId]
@@ -582,11 +575,11 @@ func (gl *GridLineRenderer) GrowEnd(
 				edge.Endmost = flaggedItemId
 				h.Edges[primaryVisIdx] = edge
 			} else {
-				recItem, recycled := recycler.Get()
+				recItemId, recycled := coldPool.Get()
 				if recycled {
-					h.LinesConfig[edge.Endmost].NextLineId = recItem.id
+					h.LinesConfig[edge.Endmost].NextLineId = recItemId
 
-					seg := &h.LinesConfig[recItem.id]
+					seg := &h.LinesConfig[recItemId]
 					seg.PrimaryAxis = primaryVisIdx
 					seg.SecondaryStart = segment.Start
 					seg.SecondaryEnd = segment.End
@@ -594,15 +587,13 @@ func (gl *GridLineRenderer) GrowEnd(
 					seg.NextLineId = -1
 					seg.UnPositioned = true
 
-					edge.Endmost = recItem.id
+					edge.Endmost = recItemId
 					h.Edges[primaryVisIdx] = edge
 				} else {
-					h.Lines = append(h.Lines, recItem.obj)
-					newIdx = len(h.Lines) - 1
+					h.Lines = append(h.Lines, nil)
+					h.LinesConfig[edge.Endmost].NextLineId = len(h.Lines) - 1
 
-					h.LinesConfig[edge.Endmost].NextLineId = newIdx
-
-					seg := SegmentConfig{
+					seg := GLSegmentConfig{
 						PrimaryAxis:    primaryVisIdx,
 						SecondaryStart: segment.Start,
 						SecondaryEnd:   segment.End,
@@ -613,10 +604,8 @@ func (gl *GridLineRenderer) GrowEnd(
 
 					h.LinesConfig = append(h.LinesConfig, seg)
 
-					edge.Endmost = newIdx
+					edge.Endmost = len(h.Lines) - 1
 					h.Edges[primaryVisIdx] = edge
-
-					container.Add(recItem.obj)
 				}
 			}
 
@@ -624,34 +613,34 @@ func (gl *GridLineRenderer) GrowEnd(
 	}
 }
 
-func (gl *GridLineRenderer) positionGridlines(region GridRegion, orientation LineOrientation, renderAbsolute bool) {
+func (gl *GridLineRenderer) fynePositionGridlines(region GridRegion, orientation LineOrientation, renderAbsolute bool) {
 	cm := gl.ctx.CoordManager
 
-	h := gl.LineItems[region][orientation]
+	li := gl.LineItems[region][orientation]
 
 	if region == RegionMain {
-		for itemId, config := range h.LinesConfig {
+		for itemId, config := range li.LinesConfig {
 			if config.PrimaryAxis != -1 && config.UnPositioned {
-				gl.posAbsoluteGridline(itemId, config, region, orientation)
+				gl.posAbsoluteGridline(itemId, config, region, orientation, li)
 			}
 		}
 		return
 	}
 
 	if renderAbsolute {
-		for itemId, config := range h.LinesConfig {
+		for itemId, config := range li.LinesConfig {
 			if config.PrimaryAxis != -1 {
-				gl.posAbsoluteGridline(itemId, config, region, orientation)
+				gl.posAbsoluteGridline(itemId, config, region, orientation, li)
 			}
 		}
 	} else {
-		for itemId, config := range h.LinesConfig {
+		for itemId, config := range li.LinesConfig {
 			if config.PrimaryAxis != -1 {
 				if config.UnPositioned {
-					gl.posAbsoluteGridline(itemId, config, region, orientation)
+					gl.posAbsoluteGridline(itemId, config, region, orientation, li)
 				} else {
 					// DELTA movement
-					item := h.Lines[itemId]
+					item := li.Lines[itemId]
 					if region == RegionFrozenCols {
 						deltaY := cm.GetScrollDeltaY()
 						item.Position1.Y -= deltaY
@@ -668,12 +657,10 @@ func (gl *GridLineRenderer) positionGridlines(region GridRegion, orientation Lin
 	}
 }
 
-func (gl *GridLineRenderer) posAbsoluteGridline(id int, config SegmentConfig, region GridRegion, orientation LineOrientation) {
+func (gl *GridLineRenderer) posAbsoluteGridline(id int, config GLSegmentConfig, region GridRegion, orientation LineOrientation, h *GLLineItems) {
 	cm := gl.ctx.CoordManager
 
-	h := gl.LineItems[region][orientation]
 	item := h.Lines[id]
-
 	if orientation == Horizontal {
 		// Horizontal: Y is fixed
 		y := cm.GetRowPixelPosEndY(region, cm.GetRowModIdxFromVisIdx(config.PrimaryAxis))
@@ -689,7 +676,6 @@ func (gl *GridLineRenderer) posAbsoluteGridline(id int, config SegmentConfig, re
 		item.Position2.X = x
 		item.Position2.Y = cm.GetRowPixelPosEndY(region, cm.GetRowModIdxFromVisIdx(config.SecondaryEnd))
 	}
-
 	h.LinesConfig[id].UnPositioned = false
 }
 
@@ -705,6 +691,7 @@ func (gl *GridLineRenderer) isGridLineRequiredH(rowVisIdx, colVisIdx int, region
 		if rowVisIdx == mergeVisRange.VisRowEnd {
 			anchorVisIdx := CellID{mergeVisRange.VisRowStart, mergeVisRange.VisColStart}
 			if hasBackground := mm.hasMergeRangeBackgroundByVisAnchorId(anchorVisIdx); hasBackground {
+				//fmt.Printf("boundary suppressed: rowVisIdx=%d colVisIdx=%d anchor=%+v\n", rowVisIdx, colVisIdx, anchorVisIdx)
 				return false
 			}
 		} else {
@@ -728,6 +715,7 @@ func (gl *GridLineRenderer) isGridLineRequiredH(rowVisIdx, colVisIdx int, region
 		if rowVisIdx == mergeVisRange.VisRowStart {
 			anchorVisIdx := CellID{mergeVisRange.VisRowStart, mergeVisRange.VisColStart}
 			if hasBackground := mm.hasMergeRangeBackgroundByVisAnchorId(anchorVisIdx); hasBackground {
+				//fmt.Printf("boundary suppressed: rowVisIdx=%d colVisIdx=%d anchor=%+v\n", rowVisIdx, colVisIdx, anchorVisIdx)
 				return false
 			}
 		} else {
@@ -748,7 +736,7 @@ func (gl *GridLineRenderer) isGridLineRequiredH(rowVisIdx, colVisIdx int, region
 	return true
 }
 
-func (gl *GridLineRenderer) isGridLineRequiredV(rowVisIdx, colVisIdx int, region GridRegion) bool {
+func (gl *GridLineRenderer) isGridLineRequiredV(colVisIdx, rowVisIdx int, region GridRegion) bool {
 
 	pr := gl.ctx.PrimitiveRenderer
 	cm := gl.ctx.CoordManager
@@ -757,7 +745,7 @@ func (gl *GridLineRenderer) isGridLineRequiredV(rowVisIdx, colVisIdx int, region
 
 	id := CellID{Row: rowVisIdx, Col: colVisIdx}
 	if mergeVisRange, exists := mm.GetMergedRangeByVisId(id); exists {
-		if rowVisIdx == mergeVisRange.VisRowEnd {
+		if colVisIdx == mergeVisRange.VisColEnd { //if rowVisIdx == mergeVisRange.VisRowEnd {
 			anchorVisIdx := CellID{mergeVisRange.VisRowStart, mergeVisRange.VisColStart}
 			if hasBackground := mm.hasMergeRangeBackgroundByVisAnchorId(anchorVisIdx); hasBackground {
 				return false
@@ -777,10 +765,10 @@ func (gl *GridLineRenderer) isGridLineRequiredV(rowVisIdx, colVisIdx int, region
 	}
 
 	// check the other cell, bordering the gridline
-	rowVisIdx++
+	colVisIdx++
 	id = CellID{Row: rowVisIdx, Col: colVisIdx}
 	if mergeVisRange, exists := mm.GetMergedRangeByVisId(id); exists {
-		if rowVisIdx == mergeVisRange.VisRowStart {
+		if colVisIdx == mergeVisRange.VisColStart { // if rowVisIdx == mergeVisRange.VisRowStart {
 			anchorVisIdx := CellID{mergeVisRange.VisRowStart, mergeVisRange.VisColStart}
 			if hasBackground := mm.hasMergeRangeBackgroundByVisAnchorId(anchorVisIdx); hasBackground {
 				return false
@@ -790,15 +778,14 @@ func (gl *GridLineRenderer) isGridLineRequiredV(rowVisIdx, colVisIdx int, region
 			return false
 		}
 	} else {
-		if rowModIdx, safe := cm.GetRowModIdxFromVisIdxSafe(rowVisIdx); safe {
-			colModIdx := cm.GetColModIdxFromVisIdx(colVisIdx)
+		if colModIdx, safe := cm.GetColModIdxFromVisIdxSafe(colVisIdx); safe {
+			rowModIdx := cm.GetRowModIdxFromVisIdx(rowVisIdx)
 			cellID := CellID{Row: rowModIdx, Col: colModIdx}
 
 			if _, hasBackground := pr.rectanglePrimitivesIndex[region][cellID]; hasBackground {
 				return false
 			}
 		}
-
 	}
 	return true
 }
